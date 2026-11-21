@@ -41,6 +41,9 @@ extern void lotr_reset_timer(void);
 /* wait delay milliseconds from the last lotr_timer call */
 extern void lotr_timer(int delay);
 
+/* Advance the deadline even when a movie frame overruns its interval. */
+extern void lotr_timer_steady(int delay);
+extern int lotr_timer_late(int tolerance);
 
 
 

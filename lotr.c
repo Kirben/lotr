@@ -35,6 +35,7 @@
 #include "init.h"
 #include "game.h"
 #include "gui.h"
+#include "sound.h"
 #include "lotr_sdl.h"
 #include "timing.h"
 #include "utils.h"
@@ -141,6 +142,9 @@ main(int argc, char *argv[])
     game_init_graphics();
 
     lotr_reset_timer();
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
+        play_music();
+
     while (!lotr_key_esc()) {
         int frame_time = FRAME_TIME;
         lotr_poll_events();

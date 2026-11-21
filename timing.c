@@ -32,7 +32,7 @@
 
 
 
-static int lotr_ticks;
+static Uint32 lotr_ticks;
 
 /*
   returns number of second since time 0
@@ -70,11 +70,11 @@ lotr_reset_timer(void)
 void
 lotr_timer(int delay)
 {
-    int timer;
+    Uint32 timer;
 
     timer = SDL_GetTicks();
 
-    if (lotr_ticks + delay > timer) {
+    if (!SDL_TICKS_PASSED(timer, lotr_ticks + delay)) {
         /* we wait some time */
         SDL_Delay(lotr_ticks + delay - timer);
         lotr_ticks = lotr_ticks + delay;
@@ -82,4 +82,19 @@ lotr_timer(int delay)
         lotr_ticks = timer;
     }
 
+}
+
+void
+lotr_timer_steady(int delay)
+{
+    lotr_ticks += delay;
+    Uint32 now = SDL_GetTicks();
+    if (!SDL_TICKS_PASSED(now, lotr_ticks))
+        SDL_Delay(lotr_ticks - now);
+}
+
+int
+lotr_timer_late(int tolerance)
+{
+    return SDL_TICKS_PASSED(SDL_GetTicks(), lotr_ticks + tolerance);
 }

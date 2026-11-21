@@ -25,3 +25,19 @@ edition that created the save before importing it.
 To carry characters from Volume I into The Two Towers, choose New Game
 and select Standard DOS, Enhanced CD, or Legacy Save, then the slot.
 Legacy Save reads a Volume I save directly. Choose X to start fresh.
+
+Enhanced CD music
+=================
+
+For Enhanced CD background music, extract audio tracks 2 through 4
+from your mixed-mode BIN/CUE image into the Enhanced CD Data folder.
+Run the bundled helper with Python 3 using the path to your CUE file
+and the same Data folder you configured in the selector, for example:
+
+    python tools/extract-cd-music.py "F:\isos\LORD_CD.cue" "C:\Games\LOTR CD"
+
+The helper writes the three background WAV files and extracts the scripted
+cues 00 through 0A as cd-cue-NN.wav when those tracks are available.
+Rerun it to add missing cues to an existing data folder. The SDL2_mixer
+build plays the background music after the opening movies. The in-game
+Music option controls both background music and the cues.

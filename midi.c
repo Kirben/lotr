@@ -81,9 +81,32 @@ stop_midi(void)
 }
 
 
-/*
-  start music
-*/
+#ifdef HAVE_SDL_MIXER
+static void
+start_music(SDL_RWops *stream, int loops)
+{
+    if (!stream) {
+        fprintf(stderr, "lotr: cannot open music stream: %s\n", SDL_GetError());
+        return;
+    }
+    Mix_HookMusicFinished(hook_music_finished);
+#if SDL_MAJOR_VERSION == 2
+    music = Mix_LoadMUS_RW(stream, 1);
+#else
+    music = Mix_LoadMUS_RW(stream);
+#endif
+    if (!music) {
+        fprintf(stderr, "lotr: cannot load music: %s\n", Mix_GetError());
+        return;
+    }
+    music_running = 1;
+    if (Mix_PlayMusic(music, loops) < 0) {
+        fprintf(stderr, "lotr: cannot play music: %s\n", Mix_GetError());
+        stop_midi();
+    }
+}
+#endif
+
 void
 play_midi(Uint8 *data, int size, int loop)
 {
@@ -100,27 +123,49 @@ play_midi(Uint8 *data, int size, int loop)
     stop_midi();
 
 #ifdef HAVE_SDL_MIXER
-    Mix_HookMusicFinished(hook_music_finished);
-
-#if SDL_MAJOR_VERSION == 2
-    music = Mix_LoadMUS_RW(SDL_RWFromConstMem(data, size), 0);
-#else
-    music = Mix_LoadMUS_RW(SDL_RWFromConstMem(data, size));
-#endif
-
-    if (!music) {
-        fprintf(stderr, "Can't load midi file: %s\n", Mix_GetError());
-        return;
-    }
-
-    music_running = 1;
-
-    if (Mix_PlayMusic(music, loop ? -1 : 1) < 0) {
-        printf("Can't play midifile: %s\n", Mix_GetError());
-        hook_music_finished();
-    }
+    start_music(SDL_RWFromConstMem(data, size), loop ? -1 : 1);
 #else
     hook_music_finished();
 #endif
 
+}
+
+void
+play_music_file(FILE *file, int loop)
+{
+#if defined(HAVE_SDL_MIXER) && SDL_MAJOR_VERSION == 2
+    if (!midi_disabled) {
+        SDL_RWops *stream = SDL_RWFromFP(file, SDL_TRUE);
+        if (stream) {
+            stop_midi();
+            start_music(stream, loop ? -1 : 0);
+            return;
+        }
+        fprintf(stderr, "lotr: cannot open CD music stream: %s\n", SDL_GetError());
+    }
+#endif
+    fclose(file);
+}
+
+int
+pause_music_for_movie(void)
+{
+#ifdef HAVE_SDL_MIXER
+    if (music && Mix_PlayingMusic() && !Mix_PausedMusic()) {
+        Mix_PauseMusic();
+        return 1;
+    }
+#endif
+    return 0;
+}
+
+void
+resume_music_after_movie(int paused)
+{
+#ifdef HAVE_SDL_MIXER
+    if (paused && music)
+        Mix_ResumeMusic();
+#else
+    (void)paused;
+#endif
 }

@@ -46,6 +46,9 @@
 /* main window */
 static SDL_Window *main_window = NULL;
 static SDL_Renderer *main_window_renderer = NULL;
+#if !defined(USE_HQX) && SDL_VERSION_ATLEAST(2, 0, 12)
+static SDL_Texture *screen_texture;
+#endif
 
 /* palette */
 static SDL_Color active_palette[256];
@@ -57,7 +60,8 @@ static int lotr_keybuffer[KEYBOARDBUFFERESIZE];
 
 
 #ifdef HAVE_SDL_MIXER
-Mix_Chunk *sound_samples[MIX_CHANNELS];
+static Mix_Chunk *sound_samples[MIX_CHANNELS];
+static Uint8 *sound_sources[MIX_CHANNELS];
 #endif
 
 
@@ -83,14 +87,16 @@ static int lotr_key_ctrl_pressed;
 void
 hook_channel_finished(int channel)
 {
-    if (channel < 0 || channel > MIX_CHANNELS || !sound_samples[channel]) {
+    if (channel < 0 || channel >= MIX_CHANNELS || !sound_samples[channel]) {
         fprintf(stderr,
                 "Non-existend or non-playing sound channel finished?\n");
         return;
     }
 
-    Mix_FreeChunk(sound_samples[channel]);
+    Mix_Chunk *finished = sound_samples[channel];
     sound_samples[channel] = 0;
+    sound_sources[channel] = NULL;
+    Mix_FreeChunk(finished);
 }
 #endif
 
@@ -146,17 +152,20 @@ lotr_system_init(void)
     lotr_reset_keyboard();
 
 #ifdef HAVE_SDL_MIXER
-    SDL_AudioFormat sample_format =
-        lotr_current_edition()->audio == LOTR_AUDIO_CD ? AUDIO_S8 : AUDIO_U8;
+    int cd_audio = lotr_current_edition()->audio == LOTR_AUDIO_CD;
+    /* Keep CD music at its original sampling rate, precision and channel count. */
     midi_disabled = SDL_InitSubSystem(SDL_INIT_AUDIO) < 0 ||
-        Mix_OpenAudio(22050, sample_format, 1, 4096) < 0;
+        Mix_OpenAudioDevice(cd_audio ? 44100 : 22050, cd_audio ? AUDIO_S16SYS : AUDIO_U8,
+                            cd_audio ? 2 : 1, cd_audio ? 2048 : 4096, NULL, 0) < 0;
     if (midi_disabled) {
         fprintf(stderr, "lotr: could not initialize mixer: %s\n",
                 SDL_GetError());
         fprintf(stderr, "lotr: sfx and music disabled\n");
     } else {
-        for (int i = 0; i < MIX_CHANNELS; ++i)
+        for (int i = 0; i < MIX_CHANNELS; ++i) {
             sound_samples[i] = 0;
+            sound_sources[i] = NULL;
+        }
         Mix_ChannelFinished(hook_channel_finished);
     }
 #endif
@@ -180,6 +189,12 @@ lotr_system_close(void)
 #endif
 
     /* Shutdown all subsystems */
+#if !defined(USE_HQX) && SDL_VERSION_ATLEAST(2, 0, 12)
+    if (screen_texture) {
+        SDL_DestroyTexture(screen_texture);
+        screen_texture = NULL;
+    }
+#endif
     SDL_DestroyWindow(main_window);
     SDL_Quit();
 }
@@ -190,7 +205,7 @@ lotr_system_close(void)
   play sound sample
 */
 void
-play_sample(Uint8 *data, int size)
+play_sample(Uint8 *data, int size, LotrPcmFormat format)
 {
 #ifdef HAVE_SDL_MIXER
     Mix_Chunk *sample;
@@ -200,12 +215,39 @@ play_sample(Uint8 *data, int size)
     if (midi_disabled || data == NULL || size <= 0)
         return;
 
-    if ((sample = Mix_QuickLoad_RAW(data, (Uint32) size)) == NULL) {
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD) {
+        /* Each signed 22,050 Hz mono sample becomes two 44,100 Hz stereo frames. */
+        if ((Uint32)size > SDL_MAX_UINT32 / (4 * sizeof(Sint16)))
+            return;
+        Uint32 bytes = (Uint32)size * 4 * sizeof(Sint16);
+        Sint16 *pcm = SDL_malloc(bytes);
+        if (!pcm)
+            return;
+        for (int i = 0; i < size; ++i) {
+            int centered = format == LOTR_PCM_S8 ? (Sint8)data[i] : (int)data[i] - 128;
+            Sint16 value = centered * 256;
+            for (int j = 0; j < 4; ++j)
+                pcm[(size_t)i * 4 + j] = value;
+        }
+        sample = Mix_QuickLoad_RAW((Uint8 *)pcm, bytes);
+        if (sample)
+            sample->allocated = 1;
+        else
+            SDL_free(pcm);
+    } else {
+        sample = Mix_QuickLoad_RAW(data, (Uint32)size);
+    }
+    if (!sample) {
         fprintf(stderr, "Can not load sound sample: %s\n", Mix_GetError());
         return;
     }
 
-    if ((channel = Mix_PlayChannel(-1, sample, 0)) < 0) {
+    /* DOS replaces the current digital effect when a new one starts. */
+    int effect_channel = lotr_current_edition()->audio == LOTR_AUDIO_CD &&
+        format == LOTR_PCM_U8 ? 0 : -1;
+    if (effect_channel >= 0)
+        Mix_HaltChannel(effect_channel);
+    if ((channel = Mix_PlayChannel(effect_channel, sample, 0)) < 0) {
         fprintf(stderr, "Can not play sound sample: %s\n", Mix_GetError());
         Mix_FreeChunk(sample);
         return;
@@ -217,6 +259,7 @@ play_sample(Uint8 *data, int size)
     }
 
     sound_samples[channel] = sample;
+    sound_sources[channel] = data;
 #endif
 }
 
@@ -230,7 +273,7 @@ stop_sample(Uint8 *data)
 #ifdef HAVE_SDL_MIXER
     int i;
     for (i = 0; i < MIX_CHANNELS; ++i)
-        if (sound_samples[i] && sound_samples[i]->abuf == data)
+        if (sound_samples[i] && sound_sources[i] == data)
             Mix_HaltChannel(i);
 #endif
 }
@@ -268,6 +311,14 @@ lotr_poll_events(void)
 
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
+#if !defined(USE_HQX) && SDL_VERSION_ATLEAST(2, 0, 12)
+            case SDL_RENDER_DEVICE_RESET:
+                if (screen_texture) {
+                    SDL_DestroyTexture(screen_texture);
+                    screen_texture = NULL;
+                }
+                break;
+#endif
             case SDL_KEYDOWN:
 
                 if (lotr_input_disabled)
@@ -442,6 +493,33 @@ lotr_input_enable(void)
 void
 lotr_show_screen(Uint8 *newscreen)
 {
+#if !defined(USE_HQX) && SDL_VERSION_ATLEAST(2, 0, 12)
+    if (!screen_texture) {
+        screen_texture = SDL_CreateTexture(main_window_renderer, SDL_PIXELFORMAT_ARGB8888,
+            SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT);
+        if (screen_texture && SDL_SetTextureScaleMode(screen_texture, SDL_ScaleModeNearest) < 0) {
+            SDL_DestroyTexture(screen_texture);
+            screen_texture = NULL;
+        }
+    }
+    if (screen_texture) {
+        Uint32 colors[256];
+        for (int i = 0; i < 256; ++i) {
+            SDL_Color color = active_palette[i];
+            colors[i] = 0xff000000u | ((Uint32)color.r << 16) | ((Uint32)color.g << 8) | color.b;
+        }
+        Uint32 pixels[SCREEN_WIDTH * SCREEN_HEIGHT];
+        for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i)
+            pixels[i] = colors[newscreen[i]];
+        if (SDL_UpdateTexture(screen_texture, NULL, pixels, SCREEN_WIDTH * sizeof(*pixels)) == 0) {
+            SDL_RenderClear(main_window_renderer);
+            if (SDL_RenderCopy(main_window_renderer, screen_texture, NULL, NULL) == 0) {
+                SDL_RenderPresent(main_window_renderer);
+                return;
+            }
+        }
+    }
+#endif
     SDL_Surface *src;
 #if SCREEN_FACT == 1
     /* convert pixels to 8-bit SDL surface */

@@ -303,7 +303,8 @@ game_new(void)
 
     int i;
 
-    play_music();
+    if (lotr_current_edition()->audio != LOTR_AUDIO_CD)
+        play_music();
 
     for (i = 0; i < 8; ++i)
         game_map_saved[i] = 0;

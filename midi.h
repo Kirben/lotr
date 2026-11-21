@@ -31,6 +31,7 @@
 #define _MIDI_H
 
 #include "lotr.h"
+#include <stdio.h>
 
 /* controls if midi is disabled */
 extern int midi_disabled;
@@ -40,6 +41,10 @@ extern int stop_midi(void);
 
 /* start music */
 extern void play_midi(Uint8 *data, int size, int loop);
+/* Takes ownership of the file. */
+extern void play_music_file(FILE *file, int loop);
+extern int pause_music_for_movie(void);
+extern void resume_music_after_movie(int paused);
 
 
 

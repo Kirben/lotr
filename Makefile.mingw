@@ -46,7 +46,7 @@ CCPARAMS = $(CFLAGS) $(INCLUDES) $(DEFINITIONS)
 SDL2_MIXER_DIR = ./SDL2_mixer-2.0.4/$(ARCH)-w64-mingw32
 ifeq ($(USE_SDL_MIXER),1)
   INCLUDES += -I$(SDL2_MIXER_DIR)/include/SDL2
-  LIBRARIES += -L$(SDL2_MIXER_DIR)/lib -l SDL2_mixer
+  LIBRARIES += -L$(SDL2_MIXER_DIR)/lib -l SDL2_mixer -lwinmm -lavrt
 endif
 
 ifeq ($(USE_HQX),1)

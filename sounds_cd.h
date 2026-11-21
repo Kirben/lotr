@@ -1,7 +1,8 @@
 
-#define CD_SOUND_COUNT 32
+#define CD_SOUND_COUNT 33
 
-static const char *const cd_sound_names[CD_SOUND_COUNT] = { "magics.adl",
+static const char *const cd_sound_names[CD_SOUND_COUNT] = {
+    "magics.adl", /* DOS ID 11. The old dispatch skipped this first effect. */
     "magicf.adl",
     "hit1.adl",
     "hit2.adl",
@@ -22,6 +23,7 @@ static const char *const cd_sound_names[CD_SOUND_COUNT] = { "magics.adl",
     "qhit.adl",
     "hhit.adl",
     "ihit.adl",
+    "cry.adl", /* DOS ID 32. The previous table omitted it, shifting later effects. */
     "grunt.adl",
     "yell.adl",
     "shriek.adl",

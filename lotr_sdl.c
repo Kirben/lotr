@@ -88,8 +88,9 @@ hook_channel_finished(int channel)
         return;
     }
 
-    Mix_FreeChunk(sound_samples[channel]);
+    Mix_Chunk *finished = sound_samples[channel];
     sound_samples[channel] = 0;
+    Mix_FreeChunk(finished);
 }
 #endif
 
@@ -195,7 +196,7 @@ lotr_system_close(void)
   play sound sample
 */
 void
-play_sample(Uint8 *data, int size)
+play_sample(Uint8 *data, int size, LotrPcmFormat format)
 {
 #ifdef HAVE_SDL_MIXER
     Mix_Chunk *sample;
@@ -205,12 +206,30 @@ play_sample(Uint8 *data, int size)
     if (data == NULL || size <= 0)
         return;
 
-    if ((sample = Mix_QuickLoad_RAW(data, (Uint32) size)) == NULL) {
+    Uint8 *pcm = data;
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD && format == LOTR_PCM_U8) {
+        pcm = SDL_malloc(size);
+        if (!pcm)
+            return;
+        for (int i = 0; i < size; ++i)
+            pcm[i] = data[i] ^ 0x80;
+    }
+    sample = Mix_QuickLoad_RAW(pcm, (Uint32) size);
+    if (!sample) {
+        if (pcm != data)
+            SDL_free(pcm);
         fprintf(stderr, "Can not load sound sample: %s\n", Mix_GetError());
         return;
     }
 
-    if ((channel = Mix_PlayChannel(-1, sample, 0)) < 0) {
+    sample->allocated = pcm != data;
+
+    /* DOS replaces the current digital effect when a new one starts. */
+    int effect_channel = lotr_current_edition()->audio == LOTR_AUDIO_CD &&
+        format == LOTR_PCM_U8 ? 0 : -1;
+    if (effect_channel >= 0)
+        Mix_HaltChannel(effect_channel);
+    if ((channel = Mix_PlayChannel(effect_channel, sample, 0)) < 0) {
         fprintf(stderr, "Can not play sound sample: %s\n", Mix_GetError());
         Mix_FreeChunk(sample);
         return;

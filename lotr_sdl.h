@@ -57,7 +57,8 @@ extern void lotr_system_close(void);
 
 
 /* play sound sample */
-extern void play_sample(Uint8 *data, int size);
+typedef enum { LOTR_PCM_U8, LOTR_PCM_S8 } LotrPcmFormat;
+extern void play_sample(Uint8 *data, int size, LotrPcmFormat format);
 
 /* stop sample */
 extern void stop_sample(Uint8 *data);

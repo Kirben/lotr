@@ -31,8 +31,10 @@
 #include "midi.h"
 #include "sound.h"
 #include "utils.h"
+#include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 
 #include "sounds_cd.h"
@@ -40,6 +42,7 @@
 
 Uint8 *music_data;
 int music_size;
+static int cd_music_muted;
 
 static Uint8 *sound_data[CD_SOUND_COUNT];
 static int sound_sizes[CD_SOUND_COUNT];
@@ -80,6 +83,38 @@ load_archive_sounds(void)
     archive_close(archive);
 }
 
+/* Some CD effects use a Creative Voice container instead of raw PCM. */
+static int
+unwrap_cd_voice(Uint8 *data, int size)
+{
+    static const char signature[] = "Creative Voice File\x1a";
+    if (size < 20 || memcmp(data, signature, 20) != 0)
+        return size;
+    if (size < 26)
+        return 0;
+
+    int pos = data[20] | (data[21] << 8);
+    if (pos < 26)
+        return 0;
+    while (pos <= size - 4 && data[pos]) {
+        int type = data[pos];
+        int length = data[pos + 1] | (data[pos + 2] << 8) | (data[pos + 3] << 16);
+        pos += 4;
+        if (length > size - pos)
+            return 0;
+        if (type == 8 && (length != 4 || data[pos + 2] || data[pos + 3]))
+            return 0;
+        if (type == 1) {
+            if (length <= 2 || data[pos + 1])
+                return 0;
+            memmove(data, data + pos + 2, length - 2);
+            return length - 2;
+        }
+        pos += length;
+    }
+    return 0;
+}
+
 static void
 load_cd_sounds(void)
 {
@@ -95,6 +130,10 @@ load_cd_sounds(void)
             exit(1);
         }
         fclose(adlfile);
+        sound_sizes[i] = unwrap_cd_voice(sound_data[i], sound_sizes[i]);
+        if (!sound_sizes[i])
+            fprintf(stderr, "lotr: unsupported or empty CD effect %s\n",
+                    cd_sound_names[i]);
     }
 
 }
@@ -142,11 +181,21 @@ sound_play(int index)
     LotrAudio audio = lotr_current_edition()->audio;
     if (audio == LOTR_AUDIO_ARCHIVE) {
         if (index > 8)
-            play_sample(sound_data[index - 8], sound_sizes[index - 8]);
+            play_sample(sound_data[index - 8], sound_sizes[index - 8], LOTR_PCM_U8);
         else
             play_midi(sound_data[index + 8], sound_sizes[index + 8], 0);
-    } else if (audio == LOTR_AUDIO_CD && index > 11) {
-        play_sample(sound_data[index - 11], sound_sizes[index - 11]);
+    } else if (audio == LOTR_AUDIO_CD && index >= 0 && index <= 0x0a) {
+        /* Play scripted CD cues once, using the ranges extracted from the disc. */
+        if (!midi_disabled && !cd_music_muted) {
+            char name[sizeof("cd-cue-00.wav")];
+            snprintf(name, sizeof(name), "cd-cue-%02X.wav", (unsigned)index);
+            FILE *file = lotr_try_open_asset(name, 0);
+            if (file)
+                play_music_file(file, 0);
+        }
+    } else if (audio == LOTR_AUDIO_CD && index >= 11 &&
+               index - 11 < CD_SOUND_COUNT) {
+        play_sample(sound_data[index - 11], sound_sizes[index - 11], LOTR_PCM_U8);
     }
 
 }
@@ -160,6 +209,23 @@ sound_play(int index)
 void
 play_music(void)
 {
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD) {
+        if (midi_disabled || cd_music_muted)
+            return;
+        const char *tracks[] = {"cd-track-02.wav", "cd-track-03.wav", "cd-track-04.wav"};
+        static int selected = -1;
+        int first = selected < 0 ? SDL_GetTicks() % 3 : selected;
+        for (int i = 0; i < 3; ++i) {
+            int index = (first + i) % 3;
+            FILE *file = lotr_try_open_asset(tracks[index], 0);
+            if (file) {
+                selected = index;
+                play_music_file(file, 1);
+                return;
+            }
+        }
+        return;
+    }
     play_midi(music_data, music_size, TRUE);
 }
 
@@ -171,7 +237,10 @@ play_music(void)
 void
 toggle_music(void)
 {
-    if (!stop_midi())
+    int was_playing = stop_midi();
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
+        cd_music_muted = was_playing;
+    if (!was_playing)
         play_music();
 }
 
@@ -187,7 +256,7 @@ music_spell_performed(void)
     if (audio == LOTR_AUDIO_ARCHIVE)
         play_midi(sound_data[15], sound_sizes[15], 0);
     else if (audio == LOTR_AUDIO_CD)
-        play_sample(sound_data[0], sound_sizes[0]);
+        play_sample(sound_data[0], sound_sizes[0], LOTR_PCM_U8);
 }
 
 
@@ -202,7 +271,7 @@ music_spell_failed(void)
     if (audio == LOTR_AUDIO_ARCHIVE)
         play_midi(sound_data[16], sound_sizes[16], 0);
     else if (audio == LOTR_AUDIO_CD)
-        play_sample(sound_data[1], sound_sizes[1]);
+        play_sample(sound_data[1], sound_sizes[1], LOTR_PCM_U8);
 }
 
 
