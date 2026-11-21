@@ -155,7 +155,9 @@ extern int game_get_moving(void);
 extern void game_set_follow(int follow);
 
 /* convert vol. I characters to vol. II */
-extern void game_convert(int game_id);
+extern int game_convert(LotrDataFormat source, int slot, int legacy);
+extern int game_import_save(int slot);
+extern int game_save_available(LotrDataFormat format, int slot, int legacy);
 
 
 #endif /* _GAME_H */

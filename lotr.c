@@ -64,7 +64,7 @@ print_usage(FILE *stream, const char *program)
 int
 main(int argc, char *argv[])
 {
-    int game_num = 0;
+    int game_num = -1;
     const char *edition = NULL;
     const char *data_dir = NULL;
     const char *movie_dir = NULL;
@@ -116,7 +116,7 @@ main(int argc, char *argv[])
         game_num = gui_ttt_start_dialog();
 
     game_new();
-    if (game_num != 0)
+    if (game_num >= 0)
         game_load(game_num);
 
 
@@ -124,7 +124,7 @@ main(int argc, char *argv[])
     cartoon_show_credits(1);
     switch (lotr_current_edition()->intro) {
         case LOTR_INTRO_CARTOON:
-            if (game_num == 0)
+            if (game_num < 0)
                 cartoon_play("opening");
             break;
         case LOTR_INTRO_CD:

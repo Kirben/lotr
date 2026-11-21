@@ -129,7 +129,15 @@ lotr_configure_edition(const char *edition, const char *data_dir,
 }
 
 char *
-lotr_save_filename(int volume, int slot)
+lotr_save_filename(LotrDataFormat format, int slot)
+{
+    char name[64];
+    snprintf(name, sizeof(name), "savegame.%s.%d", lotr_edition_at(format)->key, slot);
+    return lotr_homedir_filename(name);
+}
+
+char *
+lotr_legacy_save_filename(int volume, int slot)
 {
     char name[32];
     snprintf(name, sizeof(name), "%s.%d", volume == 2 ? "savegame2" : "savegame", slot);

@@ -8,3 +8,20 @@ Project homepage:
 http://www.wonderland.cz/lotr/
 
 This game is Free/Libre/OpenSource Software released under LPGL 2.1 or higher
+
+Saved games
+===========
+
+Each full game edition has its own slots 0 through 9. Saves are stored in ~/.lotr
+on Linux or in the saves directory on Windows.
+
+To import an older Wonderland save, keep the original filename
+(savegame.N for Volume I, savegame2.N for Volume II) in that directory.
+Launch the edition that created it, choose Options > Import Legacy, and
+enter N. This copies the save into the same slot if it is empty. Then
+choose Load Game. Older Volume I saves share a filename, so select the
+edition that created the save before importing it.
+
+To carry characters from Volume I into The Two Towers, choose New Game
+and select Standard DOS, Enhanced CD, or Legacy Save, then the slot.
+Legacy Save reads a Volume I save directly. Choose X to start fresh.

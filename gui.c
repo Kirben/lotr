@@ -1122,11 +1122,12 @@ void
 dialog_options_show(void)
 {
 
-    const char *text[7] = {
+    const char *text[8] = {
         "OPTIONS",
         "L. Load Game",
         "S. Save Game",
         "Q. Quit Game",
+        "I. Import Legacy",
         "P. Pause Game",
         "M. Start/Stop Music",
         "X. Exit"
@@ -1135,7 +1136,7 @@ dialog_options_show(void)
     dialog_mode = DIALOG_OPTIONS;
     dialog_confirm = 0;
 
-    draw_scroll(0, 0, -DEFAULT_SCROLL_WIDTH, 7, text);
+    draw_scroll(0, 0, -DEFAULT_SCROLL_WIDTH, 8, text);
 
 }
 
@@ -1146,70 +1147,30 @@ dialog_options_show(void)
  */
 
 
+static void
+dialog_slots_show(int mode, const char *title)
+{
+    const char *text[] = {
+        title, "0. Slot 0", "1. Slot 1", "2. Slot 2", "3. Slot 3",
+        "4. Slot 4", "5. Slot 5", "6. Slot 6", "7. Slot 7", "8. Slot 8",
+        "9. Slot 9", "X. Exit"
+    };
+    dialog_mode = mode;
+    dialog_confirm = 0;
+    draw_scroll(0, 0, -DEFAULT_SCROLL_WIDTH, sizeof(text) / sizeof(text[0]), text);
+}
+
 void
 dialog_save_show(void)
 {
-
-    const char *text[7] = {
-        "Save Game",
-        "1. Game One",
-        "2. Game Two",
-#if PIXEL_PRECISE
-        "X. Exit",
-        "",
-        "",
-        ""
-#else
-        "3. Game Three",
-        "4. Game Four",
-        "5. Game Five",
-        "X. Exit"
-#endif
-    };
-
-    dialog_mode = DIALOG_SAVE;
-    dialog_confirm = 0;
-
-    draw_scroll(0, 0, -DEFAULT_SCROLL_WIDTH, 7, text);
-
+    dialog_slots_show(DIALOG_SAVE, "Save Game");
 }
-
-
-
-/*
-  show load menu
- */
-
 
 void
 dialog_load_show(void)
 {
-
-    const char *text[7] = {
-        "Load Game",
-        "1. Game One",
-        "2. Game Two",
-#if PIXEL_PRECISE
-        "X. Exit",
-        "",
-        "",
-        ""
-#else
-        "3. Game Three",
-        "4. Game Four",
-        "5. Game Five",
-        "X. Exit"
-#endif
-    };
-
-    dialog_mode = DIALOG_LOAD;
-    dialog_confirm = 0;
-
-    draw_scroll(0, 0, -DEFAULT_SCROLL_WIDTH, 7, text);
-
+    dialog_slots_show(DIALOG_LOAD, "Load Game");
 }
-
-
 
 
 /*
@@ -1247,6 +1208,8 @@ dialog_options_key(int key)
             exit(0);
         if (key == 'n' || key == 'x')
             quit_menu();
+        if (lotr_current_edition()->data_format == LOTR_DATA_DEMO)
+            return;
     }
 
     switch (key) {
@@ -1264,6 +1227,10 @@ dialog_options_key(int key)
 
         case 'l':
             dialog_load_show();
+            break;
+
+        case 'i':
+            dialog_slots_show(DIALOG_IMPORT, "Import Legacy");
             break;
 
         case 'm':
@@ -1295,39 +1262,31 @@ dialog_options_key(int key)
 void
 dialog_saveload_key(int key)
 {
-    int n;
-
-    const char *saved_text[7] =
-        { "Save current game,", "done.", "", "", "", "", "" };
-    const char *loaded_text[7] =
-        { "Load previous game,", "done.", "", "", "", "", "" };
+    const char *saved[7] = { "Game saved.", "", "", "", "", "", "" };
+    const char *loaded[7] = { "Game loaded.", "", "", "", "", "", "" };
+    const char *imported[7] = { "Save imported.", "Use Load Game.", "", "", "", "", "" };
+    const char *save_error[7] = { "Save failed.", "", "", "", "", "", "" };
+    const char *load_error[7] = { "Cannot load slot.", "", "", "", "", "", "" };
+    const char *import_error[7] = {
+        "Import failed.", "Check legacy file", "and check slot.", "", "", "", ""
+    };
 
     if (key == 'x')
         quit_menu();
+    if (key < '0' || key > '9')
+        return;
 
-    if (key >= '1' && key <= '5') {
-        n = key - '0';
-
-#if PIXEL_PRECISE
-        if (n > 2)
-            return;
-#endif
-        if (dialog_mode == DIALOG_SAVE) {
-            if (game_save(n))
-                dialog_options_message_show(saved_text);
-            return;
-        }
-        if (dialog_mode == DIALOG_LOAD) {
-            if (game_load(n)) {
-                quit_menu();
-                dialog_options_message_show(loaded_text);
-            }
-            return;
-        }
-    }
+    int slot = key - '0';
+    if (dialog_mode == DIALOG_SAVE)
+        dialog_options_message_show(game_save(slot) ? saved : save_error);
+    else if (dialog_mode == DIALOG_IMPORT)
+        dialog_options_message_show(game_import_save(slot) ? imported : import_error);
+    else if (game_load(slot)) {
+        quit_menu();
+        dialog_options_message_show(loaded);
+    } else
+        dialog_options_message_show(load_error);
 }
-
-
 
 
 /*
@@ -3153,6 +3112,7 @@ gui_frame(void)
 
             case DIALOG_SAVE:
             case DIALOG_LOAD:
+            case DIALOG_IMPORT:
                 dialog_saveload_key(key);
                 break;
 
@@ -3377,115 +3337,91 @@ gui_draw_text(char *text, int x, int y)
 int
 gui_ttt_start_dialog(void)
 {
-    int key;
-    int i;
-    int c;
-    int mode = 0;
-    int savegames[10];
-    int numsaves = 0;
-    char buf[20];
-    FILE *testfile;
-    int y;
+    enum { START, SOURCE, LOAD, TRANSFER } menu = START;
+    LotrDataFormat source = LOTR_DATA_STANDARD;
+    int legacy = 0;
+    int result = -1;
+    int redraw = 1;
+    int transfer_error = 0;
+    int alpha = gui_font[(Uint8)' ']->data[0];
 
-    graphics_set_background("ongame");
-
-    /* set alpha for font */
-    c = gui_font[(Uint8)' ']->data[0];
-    for (i = 0; i < 0x100; ++i)
+    for (int i = 0; i < 0x100; ++i)
         if (gui_font[i])
-            pixmap_set_alpha(gui_font[i], c);
-
-    gui_draw_text("Old or", 30, 45);
-    gui_draw_text("New Game (O/N)", 30, 45 + 8);
-    graphics_update_screen();
-
-    for (i = 0; i < 10; ++i)
-        savegames[i] = 0;
-    numsaves = 0;
+            pixmap_set_alpha(gui_font[i], alpha);
 
     while (!lotr_key_esc()) {
-        key = lotr_get_key();
-        if (mode == 0) {
-            if (key == 'n') {
-                for (i = 0; i < 10; ++i) {
-                    testfile = fopen(lotr_save_filename(1, i), "rb");
-                    if (testfile != NULL) {
-                        numsaves++;
-                        savegames[i] = 1;
-                        fclose(testfile);
+        if (redraw) {
+            graphics_set_background("ongame");
+            if (menu == START) {
+                gui_draw_text("O. Old Game", 30, 45);
+                gui_draw_text("N. New Game", 30, 53);
+            } else if (menu == SOURCE) {
+                gui_draw_text("Transfer from Volume I?", 30, 45);
+                gui_draw_text("S. Standard DOS", 30, 55);
+                gui_draw_text("C. Enhanced CD", 30, 65);
+                gui_draw_text("L. Legacy save", 30, 75);
+                gui_draw_text("X. Start without transfer", 30, 85);
+            } else {
+                int y = 55;
+                gui_draw_text(menu == LOAD ? "Load Two Towers" : "Choose Volume I slot", 30, 45);
+                for (int i = 0; i <= 9; ++i) {
+                    if (game_save_available(source, i, legacy)) {
+                        char label[16];
+                        snprintf(label, sizeof(label), "%d. Slot %d", i, i);
+                        gui_draw_text(label, 30, y);
+                        y += 8;
                     }
                 }
-
-                if (numsaves == 0) {
-                    return 0;
-                } else {
-                    mode = 1;
-                    y = 68;
-                    gui_draw_text("Convert from", 40, y);
-                    y += 8;
-                    gui_draw_text("which game?", 44, y);
-                    y += 2;
-                    for (i = 0; i < 10; ++i)
-                        if (savegames[i]) {
-                            snprintf(buf, sizeof(buf), "%d.Game %d", i, i);
-                            y += 8;
-                            gui_draw_text(buf, 52, y);
-                        }
-                    y += 8;
-                    gui_draw_text("x.None", 52, y);
-                    graphics_update_screen();
-                }
+                if (y == 55)
+                    gui_draw_text("No saves found", 30, 55);
+                gui_draw_text("X. Back", 30, 139);
+                if (transfer_error)
+                    gui_draw_text("Cannot transfer this save", 30, 149);
             }
-            if (key == 'o') {
-                for (i = 0; i < 10; ++i) {
-                    testfile = fopen(lotr_save_filename(lotr_current_edition()->volume, i), "rb");
-                    if (testfile != NULL) {
-                        numsaves++;
-                        savegames[i] = 1;
-                        fclose(testfile);
-                    }
-                }
-
-                if (numsaves > 0) {
-                    mode = 2;
-                    y = 68;
-                    gui_draw_text("Which Game?", 44, y);
-                    for (i = 0; i < 10; ++i)
-                        if (savegames[i]) {
-                            snprintf(buf, sizeof(buf), "%d.Game %d", i, i);
-                            y += 8;
-                            gui_draw_text(buf, 52, y);
-                        }
-                    graphics_update_screen();
-                }
-            }
+            graphics_update_screen();
+            redraw = 0;
         }
 
-        if (mode == 1) {
-            if (key == 'x')
-                return 0;
-            if (key >= '0' && key <= '9')
-                if (savegames[key - '0']) {
-                    game_convert(key - '0');
-                    return 0;
-                }
-        }
-
-        if (mode == 2) {
-            if (key >= '0' && key <= '9')
-                if (savegames[key - '0'])
-                    return key - '0';
+        int key = lotr_get_key();
+        if (menu == START && key == 'n') {
+            menu = SOURCE;
+            redraw = 1;
+        } else if (menu == START && key == 'o') {
+            menu = LOAD;
+            source = LOTR_DATA_TWO_TOWERS;
+            legacy = 0;
+            transfer_error = 0;
+            redraw = 1;
+        } else if (menu == SOURCE && key == 'x') {
+            break;
+        } else if (menu == SOURCE && (key == 's' || key == 'c' || key == 'l')) {
+            source = key == 'c' ? LOTR_DATA_ENHANCED_CD : LOTR_DATA_STANDARD;
+            legacy = key == 'l';
+            menu = TRANSFER;
+            transfer_error = 0;
+            redraw = 1;
+        } else if ((menu == LOAD || menu == TRANSFER) && key == 'x') {
+            menu = menu == LOAD ? START : SOURCE;
+            redraw = 1;
+        } else if ((menu == LOAD || menu == TRANSFER) && key >= '0' && key <= '9' &&
+                   game_save_available(source, key - '0', legacy)) {
+            if (menu == LOAD) {
+                result = key - '0';
+                break;
+            }
+            if (game_convert(source, key - '0', legacy))
+                break;
+            transfer_error = 1;
+            redraw = 1;
         }
         lotr_poll_events();
         lotr_timer(50);
     }
 
-    /* unset font alpha */
-    for (i = 0; i < 0x100; ++i)
+    for (int i = 0; i < 0x100; ++i)
         if (gui_font[i])
             gui_font[i]->hasalpha = 0;
 
     lotr_reset_keyboard();
-    return 0;
-
+    return result;
 }

@@ -90,7 +90,8 @@ extern int lotr_file_exists(const char *path);
 
 /* return full path to $HOME/.lotr/<name> */
 extern char *lotr_homedir_filename(const char *name);
-extern char *lotr_save_filename(int volume, int slot);
+extern char *lotr_save_filename(LotrDataFormat format, int slot);
+extern char *lotr_legacy_save_filename(int volume, int slot);
 
 /* adds suffix to a filename */
 extern char *lotr_add_suffix(const char *name, const char *suffix);
