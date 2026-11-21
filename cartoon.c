@@ -267,7 +267,8 @@ cartoon_play(char *name)
 
                     checkcommandsize(command, 0);
 
-                    while (!lotr_kb_hit());
+                    while (!lotr_key_esc() && !lotr_get_key())
+                        lotr_sleep(10);
 
                     break;
 

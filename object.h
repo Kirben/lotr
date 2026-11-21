@@ -89,10 +89,8 @@ extern int object_armour_to_hit(int index);
 /* shield effect on to hit bonus */
 extern int object_shield_to_hit(int index);
 
-#ifdef TTT
 /* return if object can be transfered from vol. I to vol. II */
 extern int object_transferable(int index);
-#endif
 
 
 

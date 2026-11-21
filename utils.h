@@ -32,6 +32,45 @@
 #include <stdio.h>
 #include <libxml/parser.h>
 
+#define LOTR_PATH_CAPACITY 1024
+
+typedef enum {
+    LOTR_INTRO_CARTOON,
+    LOTR_INTRO_CD,
+    LOTR_INTRO_DEMO
+} LotrIntro;
+
+typedef enum {
+    LOTR_AUDIO_ARCHIVE,
+    LOTR_AUDIO_CD,
+    LOTR_AUDIO_SILENT
+} LotrAudio;
+
+typedef enum {
+    LOTR_DATA_STANDARD,
+    LOTR_DATA_ENHANCED_CD,
+    LOTR_DATA_TWO_TOWERS,
+    LOTR_DATA_DEMO
+} LotrDataFormat;
+
+typedef struct {
+    const char *key;
+    const char *title;
+    const char *default_data_dir;
+    LotrIntro intro;
+    LotrAudio audio;
+    int volume;
+    LotrDataFormat data_format;
+} LotrEdition;
+
+extern const LotrEdition *lotr_current_edition(void);
+extern const LotrEdition *lotr_edition_at(LotrDataFormat format);
+/* Startup arguments must remain valid for the lifetime of the game. */
+extern int lotr_configure_edition(const char *edition, const char *data_dir,
+                                  const char *movie_dir);
+extern FILE *lotr_open_movie(const char *path);
+extern long lotr_asset_size(const char *path, int movie);
+extern FILE *lotr_try_open_asset(const char *path, int movie);
 
 #ifndef min
 #  define min(a,b)  ((a) > (b) ? (b) : (a))
@@ -51,6 +90,7 @@ extern int lotr_file_exists(const char *path);
 
 /* return full path to $HOME/.lotr/<name> */
 extern char *lotr_homedir_filename(const char *name);
+extern char *lotr_save_filename(int volume, int slot);
 
 /* adds suffix to a filename */
 extern char *lotr_add_suffix(const char *name, const char *suffix);
@@ -85,7 +125,7 @@ extern xmlNodePtr lotr_get_subnode(xmlNodePtr node, const xmlChar *name,
                                    int force);
 
 /* return data directory */
-extern char *lotr_data_directory(void);
+extern const char *lotr_data_directory(void);
 
 
 #if defined(AMIGA_OS4) || defined(WIN32)

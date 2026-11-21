@@ -29,6 +29,7 @@
 #include "lotr.h"
 #include "lotr_sdl.h"
 #include "midi.h"
+#include "utils.h"
 #ifdef USE_HQX
 #include "hqx.h"
 #endif
@@ -147,11 +148,7 @@ lotr_system_init(void)
     lotr_reset_keyboard();
 
     desired.freq = 22050;
-#ifdef CD_VERSION
-    desired.format = AUDIO_S8;
-#else
-    desired.format = AUDIO_U8;
-#endif
+    desired.format = lotr_current_edition()->audio == LOTR_AUDIO_CD ? AUDIO_S8 : AUDIO_U8;
     desired.samples = 4096;
     desired.userdata = NULL;
     desired.channels = 1;

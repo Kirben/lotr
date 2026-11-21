@@ -1,7 +1,7 @@
 
-#define SOUNDS_NUM 32
+#define CD_SOUND_COUNT 32
 
-char *sound_names[] = { "magics.adl",
+static const char *const cd_sound_names[CD_SOUND_COUNT] = { "magics.adl",
     "magicf.adl",
     "hit1.adl",
     "hit2.adl",

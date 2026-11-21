@@ -35,17 +35,14 @@
 #include <stdlib.h>
 
 
-#ifdef CD_VERSION
 #include "sounds_cd.h"
-#else
-#define SOUNDS_NUM 25
-#endif
+#define ARCHIVE_SOUND_COUNT 25
 
 Uint8 *music_data;
 int music_size;
 
-Uint8 *sound_data[SOUNDS_NUM];
-int sound_sizes[SOUNDS_NUM];
+static Uint8 *sound_data[CD_SOUND_COUNT];
+static int sound_sizes[CD_SOUND_COUNT];
 
 #define MUSIC_MAIN_INDEX 8
 
@@ -54,20 +51,13 @@ int sound_sizes[SOUNDS_NUM];
   sound initializations
 */
 
-void
-sound_init(void)
+static void
+load_archive_sounds(void)
 {
     int i;
+    Archive *archive = archive_ndx_open("snd");
 
-#ifndef TTT
-
-#ifndef CD_VERSION
-
-    Archive *archive;
-
-    archive = archive_ndx_open("snd");
-
-    for (i = 0; i < SOUNDS_NUM; ++i) {
+    for (i = 0; i < ARCHIVE_SOUND_COUNT; ++i) {
         sound_data[i] = archive_read(archive, i);
         sound_sizes[i] = archive_data_size(archive, i);
 
@@ -88,41 +78,37 @@ sound_init(void)
     music_size = sound_sizes[MUSIC_MAIN_INDEX];
 
     archive_close(archive);
+}
 
-#else /* ifdef CD_VERSION */
-
-    FILE *adlfile;
-
-    for (i = 0; i < SOUNDS_NUM; ++i) {
-        adlfile = lotr_fopen(sound_names[i], "rb");
+static void
+load_cd_sounds(void)
+{
+    int i;
+    for (i = 0; i < CD_SOUND_COUNT; ++i) {
+        FILE *adlfile = lotr_fopen(cd_sound_names[i], "rb");
         sound_sizes[i] = lotr_filelen(adlfile);
         sound_data[i] = lotr_malloc(sound_sizes[i]);
         if (fread(sound_data[i], 1, sound_sizes[i], adlfile) !=
             sound_sizes[i]) {
-            fprintf(stderr, "lotr: can not read file %s\n", sound_names[i]);
+            fprintf(stderr, "lotr: can not read file %s\n", cd_sound_names[i]);
             perror("lotr");
             exit(1);
         }
         fclose(adlfile);
     }
 
+}
+
+void
+sound_init(void)
+{
+    LotrAudio audio = lotr_current_edition()->audio;
     music_data = NULL;
     music_size = 0;
-
-#endif
-
-#else /* ifdef TTT */
-
-    for (i = 0; i < SOUNDS_NUM; ++i) {
-        sound_data[i] = NULL;
-        sound_sizes[i] = 0;
-    }
-
-    music_data = NULL;
-    music_size = 0;
-
-#endif
-
+    if (audio == LOTR_AUDIO_ARCHIVE)
+        load_archive_sounds();
+    else if (audio == LOTR_AUDIO_CD)
+        load_cd_sounds();
 }
 
 
@@ -137,9 +123,11 @@ sound_close(void)
     int i;
 
     stop_midi();
-    for (i = 0; i < SOUNDS_NUM; ++i)
-        if (sound_data[i])
-            free(sound_data[i]);
+    for (i = 0; i < CD_SOUND_COUNT; ++i) {
+        free(sound_data[i]);
+        sound_data[i] = NULL;
+        sound_sizes[i] = 0;
+    }
 }
 
 
@@ -151,15 +139,15 @@ void
 sound_play(int index)
 {
 
-#ifndef CD_VERSION
-    if (index > 8)
-        play_sample(sound_data[index - 8], sound_sizes[index - 8]);
-    else
-        play_midi(sound_data[index + 8], sound_sizes[index + 8], 0);
-#else
-    if (index > 11)
+    LotrAudio audio = lotr_current_edition()->audio;
+    if (audio == LOTR_AUDIO_ARCHIVE) {
+        if (index > 8)
+            play_sample(sound_data[index - 8], sound_sizes[index - 8]);
+        else
+            play_midi(sound_data[index + 8], sound_sizes[index + 8], 0);
+    } else if (audio == LOTR_AUDIO_CD && index > 11) {
         play_sample(sound_data[index - 11], sound_sizes[index - 11]);
-#endif
+    }
 
 }
 
@@ -195,11 +183,11 @@ toggle_music(void)
 void
 music_spell_performed(void)
 {
-#ifndef CD_VERSION
-    play_midi(sound_data[15], sound_sizes[15], 0);
-#else
-    play_sample(sound_data[0], sound_sizes[0]);
-#endif
+    LotrAudio audio = lotr_current_edition()->audio;
+    if (audio == LOTR_AUDIO_ARCHIVE)
+        play_midi(sound_data[15], sound_sizes[15], 0);
+    else if (audio == LOTR_AUDIO_CD)
+        play_sample(sound_data[0], sound_sizes[0]);
 }
 
 
@@ -210,11 +198,11 @@ music_spell_performed(void)
 void
 music_spell_failed(void)
 {
-#ifndef CD_VERSION
-    play_midi(sound_data[16], sound_sizes[16], 0);
-#else
-    play_sample(sound_data[1], sound_sizes[1]);
-#endif
+    LotrAudio audio = lotr_current_edition()->audio;
+    if (audio == LOTR_AUDIO_ARCHIVE)
+        play_midi(sound_data[16], sound_sizes[16], 0);
+    else if (audio == LOTR_AUDIO_CD)
+        play_sample(sound_data[1], sound_sizes[1]);
 }
 
 
@@ -226,9 +214,8 @@ music_spell_failed(void)
 void
 music_combat_started(void)
 {
-#ifndef CD_VERSION
-    play_midi(sound_data[21], sound_sizes[21], 0);
-#endif
+    if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
+        play_midi(sound_data[21], sound_sizes[21], 0);
 }
 
 
@@ -239,7 +226,6 @@ music_combat_started(void)
 void
 music_combat_won(void)
 {
-#ifndef CD_VERSION
-    play_midi(sound_data[22], sound_sizes[22], 0);
-#endif
+    if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
+        play_midi(sound_data[22], sound_sizes[22], 0);
 }

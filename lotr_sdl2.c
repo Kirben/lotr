@@ -29,6 +29,7 @@
 #include "lotr.h"
 #include "lotr_sdl.h"
 #include "midi.h"
+#include "utils.h"
 #ifdef USE_HQX
 #include "hqx.h"
 #endif
@@ -99,15 +100,11 @@ hook_channel_finished(int channel)
 void
 lotr_system_init(void)
 {
-    int i;
-
-    SDL_AudioSpec desired;
-
 #ifdef DEBUG
-    if ((SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE) ==
+    if ((SDL_Init(SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE) ==
          -1))
 #else
-    if ((SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == -1))
+    if ((SDL_Init(SDL_INIT_VIDEO) == -1))
 #endif
     {
         printf("Could not initialize SDL: %s.\n", SDL_GetError());
@@ -148,28 +145,20 @@ lotr_system_init(void)
 
     lotr_reset_keyboard();
 
-    desired.freq = 22050;
-#ifdef CD_VERSION
-    desired.format = AUDIO_S8;
-#else
-    desired.format = AUDIO_U8;
-#endif
-    desired.samples = 4096;
-    desired.userdata = NULL;
-    desired.channels = 1;
-
 #ifdef HAVE_SDL_MIXER
-    if (Mix_OpenAudio(desired.freq, desired.format, 1, desired.samples) < 0) {
+    SDL_AudioFormat sample_format =
+        lotr_current_edition()->audio == LOTR_AUDIO_CD ? AUDIO_S8 : AUDIO_U8;
+    midi_disabled = SDL_InitSubSystem(SDL_INIT_AUDIO) < 0 ||
+        Mix_OpenAudio(22050, sample_format, 1, 4096) < 0;
+    if (midi_disabled) {
         fprintf(stderr, "lotr: could not initialize mixer: %s\n",
                 SDL_GetError());
         fprintf(stderr, "lotr: sfx and music disabled\n");
-        midi_disabled = 1;
+    } else {
+        for (int i = 0; i < MIX_CHANNELS; ++i)
+            sound_samples[i] = 0;
+        Mix_ChannelFinished(hook_channel_finished);
     }
-
-    for (i = 0; i < MIX_CHANNELS; ++i)
-        sound_samples[i] = 0;
-
-    Mix_ChannelFinished(hook_channel_finished);
 #endif
 
     lotr_input_disabled = 0;
@@ -208,7 +197,7 @@ play_sample(Uint8 *data, int size)
     int channel;
 
     /* Do not play non-existent or too short samples */
-    if (data == NULL || size <= 0)
+    if (midi_disabled || data == NULL || size <= 0)
         return;
 
     if ((sample = Mix_QuickLoad_RAW(data, (Uint32) size)) == NULL) {

@@ -73,14 +73,11 @@ int map_climb_mode = 0;
 
 
 /* buildings in TTT */
-#ifdef TTT
 #include "building_enters.h"
 
 #define BUILDINGS_NUM 104
 
-int buildings[BUILDINGS_NUM][4];
-
-#endif
+static int buildings[BUILDINGS_NUM][4];
 
 /* map tiles */
 Pixmap *basictiles[BASICTILENUM];
@@ -149,11 +146,9 @@ Uint8 map_objects[128 - 16];
   init map
 */
 
-void
-map_init(void)
+static void
+load_building_locations(void)
 {
-
-#ifdef TTT
     Archive *archive;
     int i, j;
 
@@ -177,10 +172,14 @@ map_init(void)
         }
 
     archive_close(archive);
+}
 
+void
+map_init(void)
+{
     building_id = -1;
-
-#endif
+    if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS)
+        load_building_locations();
 
     bzero(basictiles, sizeof(basictiles));
     bzero(tiles, sizeof(tiles));
@@ -274,9 +273,8 @@ map_close(void)
 void
 map_save_mode(xmlNodePtr node)
 {
-#ifdef TTT
-    lotr_save_prop_int(node, "building", building_id);
-#endif
+    if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS)
+        lotr_save_prop_int(node, "building", building_id);
     lotr_save_prop_int(node, "frame", map_frame);
     lotr_save_prop_int(node, "mode", map_mode);
     lotr_save_prop_int(node, "mode_param", map_mode_param);
@@ -291,14 +289,13 @@ map_save_mode(xmlNodePtr node)
 void
 map_load_mode(xmlNodePtr node)
 {
-#ifdef TTT
-    int building;
-    building = lotr_load_prop_int_default(node, "building", -1);
-    if (building == -1)
-        map_exit_building();
-    else
-        map_enter_building(building);
-#endif
+    if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS) {
+        int building = lotr_load_prop_int_default(node, "building", -1);
+        if (building == -1)
+            map_exit_building();
+        else
+            map_enter_building(building);
+    }
     map_set_frame(lotr_load_prop_int(node, "frame"));
     map_mode = lotr_load_prop_int(node, "mode");
     map_mode_param = lotr_load_prop_int(node, "mode_param");
@@ -400,9 +397,8 @@ map_set_tiles(Archive *archive, int basictileindex,
             (tileterrain[i] > 8 && tileterrain[i] < 10)) {
             fprintf(stderr, "lotr: terrain type %d unknown\n",
                     tileterrain[i]);
-#ifndef TTT
-            exit(1);
-#endif
+            if (lotr_current_edition()->data_format != LOTR_DATA_TWO_TOWERS)
+                exit(1);
         }
     }
 
@@ -470,10 +466,8 @@ map_set_map(Archive *archive, int id, int mapindex)
     int k, l;
 
     map_id = id;
-#ifdef TTT
     if (building_id != -1)
         map_exit_building();
-#endif
 
     data = decompress_ndxarchive(archive, mapindex, &size);
     if (size != MAP_WIDTH * MAP_HEIGHT * 2) {
@@ -499,9 +493,7 @@ map_set_map(Archive *archive, int id, int mapindex)
 
 
 
-#ifdef TTT
-
-Palette *building_tmp_pal;
+static Palette *building_tmp_pal;
 
 /*
   enter building in TTT
@@ -517,7 +509,8 @@ map_enter_building(int id)
     int size;
     int k, l;
 
-    if (id == building_id)
+    if (lotr_current_edition()->data_format != LOTR_DATA_TWO_TOWERS ||
+        id < 0 || id >= BUILDINGS_NUM || id == building_id)
         return;
     if (building_id != -1)
         map_exit_building();
@@ -569,7 +562,7 @@ map_enter_building(int id)
 */
 
 void
-map_exit_building()
+map_exit_building(void)
 {
     if (building_id == -1)
         return;
@@ -593,7 +586,11 @@ map_get_building(int map, int x, int y)
     int d = 1000;
     int dxx, dyy;
 
-    for (i = 0; i < 13; ++i)
+    if (lotr_current_edition()->data_format != LOTR_DATA_TWO_TOWERS ||
+        map < 0 || map >= 16)
+        return -1;
+
+    for (i = 0; i < 13 && map * 13 / 2 + i < BUILDINGS_NUM; ++i)
         if (buildings[map * 13 / 2 + i][0] != -1) {
             dxx = abs(x - buildings[map * 13 / 2 + i][2]);
             dyy = abs(y - buildings[map * 13 / 2 + i][3]);
@@ -619,8 +616,6 @@ map_building_enter_coords(int id, int *x, int *y)
     *x = buildings[id][2];
     *y = buildings[id][3];
 }
-
-#endif
 
 
 
@@ -734,10 +729,8 @@ map_draw_spot(CommandSpot *spot, int x, int y, int color)
         sw = spot->data[j + 4];
         sh = spot->data[j + 5];
 
-#ifdef TTT
         if (spot->building != -1)
             sy += spot->floor * 32 * 4 * TILESIZE / 2;
-#endif
 
         xx = 2 * sx - (x - (map_width + 1) / 2) + TILESIZE;
         yy = 2 * sy - (y - (map_height + 1) / 2) + TILESIZE;
@@ -783,58 +776,42 @@ map_display(int x, int y)
             x = (map_width + 1) / 2;
         if (y < (map_height + 1) / 2)
             y = (map_height + 1) / 2;
-#ifdef TTT
         if (building_id != -1 && x > 32 * 4 * TILESIZE - (map_width + 1) / 2)
             x = 32 * 4 * TILESIZE - (map_width + 1) / 2;
-#endif
         map_last_x = x;
         map_last_y = y;
     }
 
     /* calculate which tiles to draw */
 
-#ifdef TTT
     if (building_id != -1)
         largetilesize = 4 * TILESIZE;
-#endif
 
     startx = (x - (map_width + 1) / 2) / largetilesize;
     endx = (x + (map_width + 1) / 2) / largetilesize;
     endx += 1;
 
-#ifndef TTT
-    if (endx > MAP_WIDTH)
-        endx = MAP_WIDTH;
-#else
     if (building_id == -1 && endx > MAP_WIDTH)
         endx = MAP_WIDTH;
     if (building_id != -1 && endx > BUILDING_WIDTH)
         endx = BUILDING_WIDTH;
-#endif
 
     starty = (y - (map_height + 1) / 2) / largetilesize;
     endy = (y + (map_height + 1) / 2) / largetilesize;
     endy += 1;
 
 
-#ifndef TTT
-    if (endy > MAP_HEIGHT)
-        endy = MAP_HEIGHT;
-#else
     if (building_id == -1 && endy > MAP_HEIGHT)
         endy = MAP_HEIGHT;
     if (building_id != -1 && endy > BUILDING_HEIGHT)
         endy = BUILDING_HEIGHT;
-#endif
 
 
     /*
        draw map
      */
 
-#ifdef TTT
     if (building_id == -1)
-#endif
         if (map_mode == MAP_NORMAL || map_mode == MAP_LIGHTED)
             for (j = starty; j < endy; ++j)
                 for (i = startx; i < endx; ++i)
@@ -847,7 +824,6 @@ map_display(int x, int y)
                                                              1) / 2));
 
 
-#ifdef TTT
     if (building_id != -1
         && (map_mode == MAP_NORMAL || map_mode == MAP_LIGHTED))
         for (j = starty; j < endy; ++j)
@@ -855,7 +831,6 @@ map_display(int x, int y)
                 map_draw_tile(building_desc[i][j],
                               i * largetilesize - (x - (map_width + 1) / 2),
                               j * largetilesize - (y - (map_height + 1) / 2));
-#endif
 
 
     if (map_mode == MAP_DARK)
@@ -874,10 +849,9 @@ map_display(int x, int y)
         for (i = 0; i < map_num_spots; ++i) {
             if (map_spots[i]->map == map_id) {
                 CommandSpot *spot = map_spots[i];
-#ifdef TTT
-                if (spot->building != building_id)
+                if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS &&
+                    spot->building != building_id)
                     continue;
-#endif
                 map_draw_spot(spot, x, y, 0x41);
             }
         }
@@ -886,10 +860,9 @@ map_display(int x, int y)
         for (i = 0; i < map_num_pythonspots; ++i) {
             if (map_pythonspots[i]->map == map_id) {
                 CommandSpot *spot = map_pythonspots[i];
-#ifdef TTT
-                if (spot->building != building_id)
+                if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS &&
+                    spot->building != building_id)
                     continue;
-#endif
                 map_draw_spot(spot, x, y, 0x48);
             }
         }
@@ -1000,12 +973,10 @@ map_animate_frame(void)
 {
 
     /* no animations in buildings */
-#ifdef TTT
     if (building_id != -1)
         return;
     if (gui_mode() == DIALOG_BOOK)
         return;
-#endif
 
     /* animate day/night changes */
 
@@ -1039,14 +1010,14 @@ map_animate_frame(void)
         /* underground water */
         graphics_rotate_palette_left(0x31, 0x35);
 
-#ifndef TTT
-        /* lava in Moria and Dol-Guldur */
-        if (map_id == 9 || map_id == 0xd)
-            graphics_rotate_palette_left(0x1c, 0x1e);
+        if (lotr_current_edition()->data_format != LOTR_DATA_TWO_TOWERS) {
+            /* lava in Moria and Dol-Guldur */
+            if (map_id == 9 || map_id == 0xd)
+                graphics_rotate_palette_left(0x1c, 0x1e);
 
-        /* fire animation */
-        graphics_rotate_palette_left(0x3c, 0x3f);
-#endif
+            /* fire animation */
+            graphics_rotate_palette_left(0x3c, 0x3f);
+        }
     }
 
 }
@@ -1159,12 +1130,6 @@ terrain_get(int x, int y)
     if (x < 0 || y < 0)
         return 0;
 
-#ifndef TTT
-    if (x >= MAP_WIDTH * 16 || y >= MAP_HEIGHT * 16)
-        return 0;
-    largetile = map_desc[x / 16][y / 16];
-    tile = largetiles[largetile][(x % 16) / 4][(y % 16) / 4];
-#else
     if (building_id == -1) {
         if (x >= MAP_WIDTH * 16 || y >= MAP_HEIGHT * 16)
             return 0;
@@ -1175,7 +1140,6 @@ terrain_get(int x, int y)
             return 0;
         tile = building_desc[x / 4][y / 4];
     }
-#endif
 
     basictile = tiles[tile][x % 4][y % 4];
 
@@ -1359,21 +1323,16 @@ map_is_in_spot(Character *character, CommandSpot *spot, int *w, int *h)
 
     if (spot == NULL)
         return 0;
-#ifndef TTT
-    if (!spot->flag)
+    if (!spot->flag && (lotr_current_edition()->data_format != LOTR_DATA_TWO_TOWERS ||
+                        spot != game_get_actual_spot()))
         return 0;
-#else /* in TTT spot is valid even after disable */
-    if (!spot->flag && spot != game_get_actual_spot())
-        return 0;
-#endif
 
     if (spot->map != map_id)
         return 0;
 
-#ifdef TTT
-    if (spot->building != building_id)
+    if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS &&
+                    spot->building != building_id)
         return 0;
-#endif
 
     i = 5;
     while (i + 6 < spot->headersize) {
@@ -1382,10 +1341,8 @@ map_is_in_spot(Character *character, CommandSpot *spot, int *w, int *h)
         sw = spot->data[i + 4];
         sh = spot->data[i + 5];
 
-#ifdef TTT
         if (spot->building != -1)
             sy += spot->floor * 32 * 4 * TILESIZE / 2;
-#endif
 
         if (sh != 0 && sw != 0 && character->x >= sx
             && character->x <= sx + sw && character->y >= sy

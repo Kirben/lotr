@@ -88,6 +88,12 @@ char combat_result_text[1024];
 
 int ring_not_working;
 
+static int
+combat_in_grid(int x, int y)
+{
+    return x >= 0 && x < COMBAT_WIDTH && y >= 0 && y < COMBAT_HEIGHT;
+}
+
 /*
   combat was loosed
 */
@@ -155,7 +161,7 @@ combat_enemy_remove(Character *character)
 
     combat_enemies_num--;
 
-    if (combat_enemies <= 0)
+    if (combat_enemies_num == 0)
         combat_won();
 
 }
@@ -339,7 +345,7 @@ combat_move_to_area(Character *character)
     x = character->x / 4 - combat_x;
     y = character->y / 4 - combat_y;
 
-    if (x < 0 || y < 0 || x >= COMBAT_WIDTH || y >= COMBAT_HEIGHT) {
+    if (!combat_in_grid(x, y)) {
         if (x < 0)
             x = 0;
         if (y < 0)
@@ -347,7 +353,7 @@ combat_move_to_area(Character *character)
         if (x >= COMBAT_WIDTH)
             x = COMBAT_WIDTH - 1;
         if (y >= COMBAT_HEIGHT)
-            x = COMBAT_HEIGHT - 1;
+            y = COMBAT_HEIGHT - 1;
     } else {
         if (combat_area[x][y] != 0 && combat_area[x][y] < 1000)
             return;
@@ -418,7 +424,7 @@ combat_start(void)
     if (leader_x >= COMBAT_WIDTH)
         leader_x = COMBAT_WIDTH - 1;
     if (leader_y >= COMBAT_HEIGHT)
-        leader_x = COMBAT_HEIGHT - 1;
+        leader_y = COMBAT_HEIGHT - 1;
 
 
     combat_area_init();
@@ -566,37 +572,38 @@ combat_get_mode()
  */
 
 
+static int
+combat_player_can_move(int dx, int dy)
+{
+    int x = active_character->x / 4 + dx;
+    int y = active_character->y / 4 + dy;
+    return combat_in_grid(x - combat_x, y - combat_y) &&
+        map_can_move_to(active_character, x, y);
+}
+
 void
 combat_player_move()
 {
 
-    if (lotr_key_left() &&
-        map_can_move_to(active_character, active_character->x / 4 - 1,
-                        active_character->y / 4)) {
+    if (lotr_key_left() && combat_player_can_move(-1, 0)) {
         character_move_left(active_character);
         active_character->ap -= COMBAT_MOVE_COST;
         return;
     }
 
-    if (lotr_key_right() &&
-        map_can_move_to(active_character, active_character->x / 4 + 1,
-                        active_character->y / 4)) {
+    if (lotr_key_right() && combat_player_can_move(1, 0)) {
         character_move_right(active_character);
         active_character->ap -= COMBAT_MOVE_COST;
         return;
     }
 
-    if (lotr_key_up() &&
-        map_can_move_to(active_character, active_character->x / 4,
-                        active_character->y / 4 - 1)) {
+    if (lotr_key_up() && combat_player_can_move(0, -1)) {
         character_move_up(active_character);
         active_character->ap -= COMBAT_MOVE_COST;
         return;
     }
 
-    if (lotr_key_down() &&
-        map_can_move_to(active_character, active_character->x / 4,
-                        active_character->y / 4 + 1)) {
+    if (lotr_key_down() && combat_player_can_move(0, 1)) {
         character_move_down(active_character);
         active_character->ap -= COMBAT_MOVE_COST;
         return;
@@ -665,7 +672,8 @@ combat_enemy_move()
         if (active_character != combat_enemies[i]) {
             x = combat_enemies[i]->x / 4 - combat_x;
             y = combat_enemies[i]->y / 4 - combat_y;
-            combat_area[x][y] = 0;
+            if (combat_in_grid(x, y))
+                combat_area[x][y] = 0;
         }
 
     combat_stack_size = 0;
@@ -679,6 +687,8 @@ combat_enemy_move()
                 continue;
             x = combat_party[i]->x / 4 - combat_x;
             y = combat_party[i]->y / 4 - combat_y;
+            if (!combat_in_grid(x, y))
+                continue;
             combat_area[x][y] = 0;
 
             for (k = -MAP_NEAR_DISTANCE / 4; k <= MAP_NEAR_DISTANCE / 4; ++k)
@@ -712,6 +722,10 @@ combat_enemy_move()
 
     x = active_character->x / 4 - combat_x;
     y = active_character->y / 4 - combat_y;
+    if (!combat_in_grid(x, y)) {
+        active_character->ap = 0;
+        return;
+    }
 
     v = combat_area[x][y];
 
@@ -777,7 +791,7 @@ combat_frame()
 
         if (gui_mode() != DIALOG_MESSAGE) {
 
-            if (combat_who_attacked->life <= 0 &&
+            if (combat_who_attacked && combat_who_attacked->life <= 0 &&
                 game_in_party(combat_who_attacked))
                 gui_player_dead(combat_who_attacked, 0);
 
@@ -844,7 +858,7 @@ combat_character_finished()
 
     if (active_character->x < 0) {
         combat_enemy_remove(active_character);
-        if (combat_enemies <= 0)
+        if (combat_enemies_num == 0)
             return;
     } else {
         while (active_character->action != CHARACTER_STAY)
@@ -1014,7 +1028,7 @@ combat_attack(Character *who, Character *whom)
 
             /* armours have impairing effect */
             if (object_is_armour(item))
-                tohit -= object_weapon_to_hit(item);
+                tohit -= object_armour_to_hit(item);
         }
 
     /* better chance to hit if we are skilled with our weapon */
@@ -1028,12 +1042,12 @@ combat_attack(Character *who, Character *whom)
 
     for (i = 0; i < whom->items_num; ++i)
         if (whom->item_used[i]) {
-            item = who->items[i];
+            item = whom->items[i];
 
             /* armours have impairing effect */
             if (object_is_armour(item)) {
                 damage_reduced = object_armour_reduced(item);
-                tohit += object_weapon_to_hit(item);
+                tohit += object_armour_to_hit(item);
             }
 
             if (object_is_shield(item))
@@ -1103,6 +1117,8 @@ combat_attack(Character *who, Character *whom)
             if (whom->life == 0) {
                 snprintf(combat_result_text, sizeof(combat_result_text), "%s kills %s.", who->name,
                          whom->name);
+                if (!game_in_party(whom))
+                    combat_who_attacked = NULL;
                 combat_character_remove(whom);
 
             } else {

@@ -196,11 +196,8 @@ gui_init(void)
 
 
     /* init paragraphs */
-#ifndef TTT
-    char *para_filename = "para.dat";
-#else
-    char *para_filename = "para2.dat";
-#endif
+    const char *para_filename = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ?
+        "para2.dat" : "para.dat";
     if (lotr_file_exists(para_filename)) {
         FILE *parfile;
         int parlotr_filelen;
@@ -716,14 +713,12 @@ dialog_message_key(int key)
                 cartoon_play("cart10");
             exit(0);
         }
-#ifdef TTT
         if (dialog_mode == DIALOG_BOOK) {
             gui_set_palette();
             map_set_palette();
             shapes_set_palette();
             gui_clear();
         }
-#endif
         quit_menu();
     }
 
@@ -843,11 +838,7 @@ gui_paragraph_scroll(void)
 
     gui_clear();
     game_draw_map();
-#ifndef TTT
-    width = 32;
-#else
-    width = 36;
-#endif
+    width = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ? 36 : 32;
 
     if (paragraphs[gui_paragraph_pos] == 0x5)
         ++gui_paragraph_pos;
@@ -1073,8 +1064,6 @@ dialog_print_active_spot_key(int key)
 }
 
 
-#ifdef TTT
-
 /*
   shows a book with the next chapter in TTT
 */
@@ -1092,8 +1081,6 @@ gui_book(char *text)
     gui_message(text, 0);
     lotr_reset_keyboard();
 }
-
-#endif
 
 
 
@@ -2365,13 +2352,13 @@ dialog_question_key(int key)
 
             switch (spell_type) {
 
-#ifdef TTT
                 case 'B':
+                    if (lotr_current_edition()->volume != 2)
+                        goto spell_foul;
                     map_enter_building(spell[0]);
                     game_leader_teleport(0, 16 * 4 * 4, 16 * 4 * 4, 0xff,
                                          0xff);
                     break;
-#endif
 
                 case 'E':
                     reg = !game_get_register(spell[0]);
@@ -3371,8 +3358,6 @@ gui_proceed_frames(void)
 
 
 
-#ifdef TTT
-
 /* write a text */
 void
 gui_draw_text(char *text, int x, int y)
@@ -3423,8 +3408,7 @@ gui_ttt_start_dialog(void)
         if (mode == 0) {
             if (key == 'n') {
                 for (i = 0; i < 10; ++i) {
-                    snprintf(buf, sizeof(buf), "savegame.%d", i);
-                    testfile = fopen(lotr_homedir_filename(buf), "rb");
+                    testfile = fopen(lotr_save_filename(1, i), "rb");
                     if (testfile != NULL) {
                         numsaves++;
                         savegames[i] = 1;
@@ -3454,8 +3438,7 @@ gui_ttt_start_dialog(void)
             }
             if (key == 'o') {
                 for (i = 0; i < 10; ++i) {
-                    snprintf(buf, sizeof(buf), "savegame2.%d", i);
-                    testfile = fopen(lotr_homedir_filename(buf), "rb");
+                    testfile = fopen(lotr_save_filename(lotr_current_edition()->volume, i), "rb");
                     if (testfile != NULL) {
                         numsaves++;
                         savegames[i] = 1;
@@ -3506,6 +3489,3 @@ gui_ttt_start_dialog(void)
     return 0;
 
 }
-
-
-#endif

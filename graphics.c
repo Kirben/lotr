@@ -278,10 +278,9 @@ pixmap_set_width(Pixmap *pixmap, int width)
         fprintf(stderr,
                 "lotr: can not set width %d to pixmap with datasize=%d\n",
                 width, pixmap->datasize);
-#ifndef CD_VERSION
-        /* TODO remove CDHACK */
-        exit(1);
-#endif
+        /* Enhanced CD assets can contain a mismatched width. */
+        if (lotr_current_edition()->data_format != LOTR_DATA_ENHANCED_CD)
+            exit(1);
     }
 
     pixmap->width = width;

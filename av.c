@@ -45,7 +45,7 @@
 /* Longest sample in AV file 2208444 (in 11khz) */
 #define MAX_SAMPLE_GROWTH (6 * 1024 * 1024)
 
-char *av_names[] = { "sacf",
+static const char *const av_names[] = { "sacf",
     "sadf",
     "sagf",
     "saaf",
@@ -63,6 +63,13 @@ char *av_names[] = { "sacf",
     "sarf",
     "saqf"
 };
+
+const char *
+av_name(int index)
+{
+    return (unsigned int)index < sizeof(av_names) / sizeof(av_names[0]) ?
+        av_names[index] : NULL;
+}
 
 /*
   play one audio sample
@@ -92,18 +99,40 @@ read_av_audio_sample(Uint8 *audiobuf, int *audiobufpos, FILE *avfile)
         *(buf++) = (sample[i - 1] + sample[i]) / 2;
         *(buf++) = sample[i];
     }
-    buf = audiobuf + *audiobufpos;
-
     *audiobufpos += 2 * AV_SAMPLE_LEN;
     return 1;
 }
 
+/* The interleaved audio must be complete before the mixer reads it. */
+static int
+load_av_audio(Uint8 *audio, FILE *file)
+{
+    Uint8 index[2 * AV_WIDTH * AV_HEIGHT];
+    int size = 0;
+    for (int i = 0; i < 14; ++i)
+        if (!read_av_audio_sample(audio, &size, file))
+            return 0;
+    long first_frame = ftell(file);
+    if (first_frame < 0)
+        return 0;
+
+    while (fread(index, sizeof(index), 1, file) == 1) {
+        long tiles = 0;
+        for (size_t i = 0; i < sizeof(index); i += 2)
+            if (index[i] == 0xff && index[i + 1] == 0xff)
+                tiles++;
+        if (fseek(file, tiles * 64, SEEK_CUR) != 0 ||
+            !read_av_audio_sample(audio, &size, file))
+            break;
+    }
+    return fseek(file, first_frame, SEEK_SET) == 0 ? size : 0;
+}
 
 /*
    play av
 */
 void
-av_play(char *name)
+av_play(const char *name)
 {
     FILE *avfile;
     char *fullname;             /* name + suffix */
@@ -112,7 +141,6 @@ av_play(char *name)
     Uint8 *src, *dst;
 
     Uint8 *audiobuf;
-    int audiobufpos = 0;
 
     Pixmap *pixmap;
     Pixmap *av_frame, *av_frame_old, *av_frame_tmp;
@@ -123,7 +151,7 @@ av_play(char *name)
     int pos;
 
     fullname = lotr_add_suffix(name, "av");
-    avfile = lotr_fopen(fullname, "rb");
+    avfile = lotr_open_movie(fullname);
     free(fullname);
 
 
@@ -150,18 +178,11 @@ av_play(char *name)
     av_frame_old = pixmap_new(8 * AV_WIDTH, 8 * AV_HEIGHT);
 
     audiobuf = lotr_malloc(MAX_SAMPLE_GROWTH);
-    bzero(audiobuf, MAX_SAMPLE_GROWTH);
-
-    for (i = 0; i < 14; ++i) {
-        if (!read_av_audio_sample(audiobuf, &audiobufpos, avfile)) {
-            fprintf(stderr,
-                    "lotr: corrupted av file %s.av: can't read audio data\n",
-                    name);
-            exit(1);
-        }
+    int audio_size = load_av_audio(audiobuf, avfile);
+    if (!audio_size) {
+        fprintf(stderr, "lotr: corrupted av file %s.av: can't read audio data\n", name);
+        exit(1);
     }
-
-    play_sample(audiobuf, MAX_SAMPLE_GROWTH);
 
     if (fread(index, 2 * AV_WIDTH * AV_HEIGHT, 1, avfile) != 1) {
         fprintf(stderr,
@@ -170,6 +191,7 @@ av_play(char *name)
         exit(1);
     }
 
+    play_sample(audiobuf, audio_size);
     lotr_reset_keyboard();
     lotr_reset_timer();
 
@@ -243,7 +265,7 @@ av_play(char *name)
         lotr_timer(66);
         lotr_poll_events();
 
-        if (!read_av_audio_sample(audiobuf, &audiobufpos, avfile))
+        if (fseek(avfile, AV_SAMPLE_LEN, SEEK_CUR) != 0)
             break;
 
         if (fread(index, 2 * AV_WIDTH * AV_HEIGHT, 1, avfile) != 1)
@@ -257,6 +279,7 @@ av_play(char *name)
 
     }
 
+    fclose(avfile);
     while (playing_sample() && !lotr_key_esc()) {
         lotr_timer(10);
         lotr_poll_events();
@@ -284,11 +307,12 @@ av_play(char *name)
 void
 av_playnum(int num)
 {
-    if (num < 0 || num >= 17) {
+    const char *name = av_name(num);
+    if (!name) {
         fprintf(stderr, "lotr: non-existent av file number=%d\n", num);
         exit(1);
     }
 
-    av_play(av_names[num]);
+    av_play(name);
 
 }

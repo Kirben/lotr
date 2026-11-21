@@ -41,11 +41,8 @@
 #include <libxml/parser.h>
 
 
-#ifndef TTT
 #include "characters_pos.h"
-#else
 #include "characters_pos_ttt.h"
-#endif
 
 Character *lotr_characters[CHARACTERS_NUM];
 
@@ -134,13 +131,9 @@ character_set_shape(Character *character, int character_id, int shape_id)
     character->shapes[4] = shape_get(6 * shape_id + 4);
     character->shapes[5] = shape_get(6 * shape_id + 5);
 
-    int is_composite = FALSE;
-#ifndef TTT
-    is_composite = (character_id == 0xc3); /* Balrog */
-#else
-    is_composite = (character_id == 0x23)  /* Mumak */
-                || (character_id == 0xb6); /* Dragon */
-#endif
+    int is_composite = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ?
+        (character_id == 0x23 || character_id == 0xb6) : /* Mumak or Dragon */
+        character_id == 0xc3;                           /* Balrog */
     character->composite_shape = is_composite;
     if (is_composite) {
         character->shapes[6] =  shape_get(6 * shape_id + 6);
@@ -173,11 +166,8 @@ characters_init()
 
     Archive *archive;
 
-#ifndef DEMO
-    archive = archive_ndx_open("nnpcs");
-#else
-    archive = archive_ndx_open("npcs");
-#endif
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    archive = archive_ndx_open(format == LOTR_DATA_DEMO ? "npcs" : "nnpcs");
 
     if (archive->size != CHARACTERS_NUM) {
         fprintf(stderr, "lotr: expecting %d game characters (%d found)\n",
@@ -213,11 +203,8 @@ characters_init()
         lotr_characters[i]->horse_shape_id = chardata->horse_shape;
         lotr_characters[i]->portrait = chardata->portrait;
         lotr_characters[i]->direction = chardata->direction;
-#ifdef CD_VERSION
-        /* directions in npc data seem to be in range 0--4, strange... */
-        if (lotr_characters[i]->direction == 4)
+        if (format == LOTR_DATA_ENHANCED_CD && lotr_characters[i]->direction == 4)
             lotr_characters[i]->direction = CHARACTER_DOWN;
-#endif
 
         lotr_characters[i]->silver = chardata->silver;
         lotr_characters[i]->dex = chardata->dex;
@@ -240,15 +227,14 @@ characters_init()
             i == 0xa5 ||        /* Gandalf */
             i == 0xa6 ||        /* Gimli */
             i == 0xa7 ||        /* Legolas */
-#ifndef TTT
-            i == 0xa8 ||        /* Boromir */
-            i == 0x01 ||        /* Kiri */
-            i == 0xbe ||        /* Bilbo */
-            i == 0xc5 ||        /* Celeborn */
-            i == 0xca ||        /* Athelwyn */
-            i == 0xef ||        /* false Radagast */
-#else
-#endif
+            (format != LOTR_DATA_TWO_TOWERS && (
+                i == 0xa8 ||        /* Boromir */
+                i == 0x01 ||        /* Kiri */
+                i == 0xbe ||        /* Bilbo */
+                i == 0xc5 ||        /* Celeborn */
+                i == 0xca ||        /* Athelwyn */
+                i == 0xef)) || /* false Radagast */
+
             i == 0xff;
 
 
@@ -257,18 +243,16 @@ characters_init()
         lotr_characters[i]->name[16] = 0;
         strncpy(lotr_characters[i]->original_name, (char *)chardata->name, 16);
         lotr_characters[i]->original_name[16] = 0;
-#ifdef TTT
-        if (strncmp(lotr_characters[i]->name, "door", 19) == 0
-            || strncmp(lotr_characters[i]->name, "Door", 19) == 0)
+        if (format == LOTR_DATA_TWO_TOWERS &&
+            (strncmp(lotr_characters[i]->name, "door", 19) == 0 ||
+             strncmp(lotr_characters[i]->name, "Door", 19) == 0))
         {
             lotr_characters[i]->x_offset = -15;
             lotr_characters[i]->y_offset = -5;
         }
-#endif
-
         lotr_characters[i]->ring_mode = 0;
 
-        for (j = 0; chardata->items[j] != 0xff && j < 10; ++j) {
+        for (j = 0; j < sizeof(chardata->items) && chardata->items[j] != 0xff; ++j) {
             lotr_characters[i]->items[j] = chardata->items[j];
             lotr_characters[i]->item_used[j] = 0;
             if (object_is_ring(lotr_characters[i]->items[j]))
@@ -278,13 +262,13 @@ characters_init()
         lotr_characters[i]->items_num = j;
 
 
-        for (j = 0; chardata->spells[j] != 0xff && j < 10; ++j)
+        for (j = 0; j < sizeof(chardata->spells) && chardata->spells[j] != 0xff; ++j)
             lotr_characters[i]->spells[j] = chardata->spells[j];
 
         lotr_characters[i]->spells_num = j;
 
 
-        for (j = 0; chardata->skills[j] != 0xff && j < 10; ++j)
+        for (j = 0; j < sizeof(chardata->skills) && chardata->skills[j] != 0xff; ++j)
             lotr_characters[i]->skills[j] = chardata->skills[j];
 
         lotr_characters[i]->skills_num = j;
@@ -310,15 +294,16 @@ characters_init()
 
     archive_close(archive);
 
-#ifdef TTT
-    for (i = 0; characters_pos[i][0] != 0xffff; ++i) {
-        lotr_characters[characters_pos[i][3]]->party_id =
-            characters_pos[i][8];
-        lotr_characters[characters_pos[i][3]]->x = characters_pos[i][0];
-        lotr_characters[characters_pos[i][3]]->y = characters_pos[i][1];
-        lotr_characters[characters_pos[i][3]]->map = characters_pos[i][2];
+    if (format == LOTR_DATA_TWO_TOWERS) {
+        for (i = 0; two_towers_positions[i][0] != 0xffff; ++i) {
+            const int *position = two_towers_positions[i];
+            Character *character = lotr_characters[position[3]];
+            character->party_id = position[8];
+            character->x = position[0];
+            character->y = position[1];
+            character->map = position[2];
+        }
     }
-#endif
 
 
 
@@ -368,9 +353,8 @@ characters_save(xmlNodePtr node)
             lotr_save_prop_int(cur, "luck", lotr_characters[i]->luck);
             lotr_save_prop_int(cur, "will", lotr_characters[i]->will);
 
-#ifdef TTT
-            lotr_save_prop_int(cur, "party", lotr_characters[i]->party_id);
-#endif
+            if (lotr_current_edition()->volume == 2)
+                lotr_save_prop_int(cur, "party", lotr_characters[i]->party_id);
             lotr_save_prop_int(cur, "actived", lotr_characters[i]->actived);
             lotr_save_prop_int(cur, "last_eat", lotr_characters[i]->last_eat);
             lotr_save_prop_int(cur, "willing_join",
@@ -460,9 +444,8 @@ characters_load(xmlNodePtr node)
             lotr_characters[i]->luck = lotr_load_prop_int(cur, "luck");
             lotr_characters[i]->will = lotr_load_prop_int(cur, "will");
 
-#ifdef TTT
-            lotr_characters[i]->party_id = lotr_load_prop_int(cur, "party");
-#endif
+            if (lotr_current_edition()->volume == 2)
+                lotr_characters[i]->party_id = lotr_load_prop_int(cur, "party");
             lotr_characters[i]->actived = lotr_load_prop_int(cur, "actived");
             lotr_characters[i]->last_eat =
                 lotr_load_prop_int(cur, "last_eat");
@@ -504,7 +487,6 @@ characters_load(xmlNodePtr node)
 
 
 
-#ifdef TTT
 /*
   convert character
 */
@@ -559,7 +541,6 @@ character_convert(xmlNodePtr node, int index)
     }
 
 }
-#endif
 
 
 
@@ -630,25 +611,23 @@ character_fill_map(int map_num, int building)
 {
     int i;
     Character *character;
+    int two_towers = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS;
+    const int (*positions)[10] = two_towers ? two_towers_positions : fellowship_positions;
 
     map_remove_all_characters();
 
-    for (i = 0; characters_pos[i][0] != 0xffff; ++i) {
-        character = lotr_characters[characters_pos[i][3]];
-        if (!character->actived && characters_pos[i][2] == map_num)
-#ifdef TTT
-            if (characters_pos[i][6] == building)
-#endif
-            {
-                character->x = characters_pos[i][0];
-                character->y = characters_pos[i][1];
-#ifdef TTT
-                if (building != 0xff)
-                    character->y += characters_pos[i][7] * 4 * 4 * 32;
-#endif
-                character->map = characters_pos[i][2];
-                map_add_character(character);
-            }
+    for (i = 0; positions[i][0] != 0xffff; ++i) {
+        const int *position = positions[i];
+        character = lotr_characters[position[3]];
+        if (!character->actived && position[2] == map_num &&
+            (!two_towers || position[6] == building)) {
+            character->x = position[0];
+            character->y = position[1];
+            if (two_towers && building != 0xff)
+                character->y += position[7] * 4 * 4 * 32;
+            character->map = position[2];
+            map_add_character(character);
+        }
         if (character->actived && character->map == map_num) {
             map_unique_add_character(character);
         }
@@ -745,14 +724,14 @@ character_draw(int id, int x, int y, int dir)
 
             char_shape = character->shape_id;
 
-#ifdef TTT
-            if (char_shape == 98 || char_shape == 17 || char_shape == 115)
-                char_shape = 0;
-            if (char_shape == 110)
-                char_shape = 4;
-            if (char_shape == 101)
-                char_shape = 3;
-#endif
+            if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS) {
+                if (char_shape == 98 || char_shape == 17 || char_shape == 115)
+                    char_shape = 0;
+                if (char_shape == 110)
+                    char_shape = 4;
+                if (char_shape == 101)
+                    char_shape = 3;
+            }
 
             if (char_shape > 35)
                 char_shape = 0;
@@ -781,23 +760,23 @@ character_draw(int id, int x, int y, int dir)
     int yy = y + character->y_offset;
     shape_draw(character->shapes[draw_action], frame, xx, yy);
     if (character->composite_shape) {
-#ifndef TTT
-        if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
-            int off = character->shapes[draw_action]->pixmaps[frame]->width;
-            shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
+        if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS) {
+            if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
+                int off = character->shapes[draw_action]->pixmaps[frame]->height;
+                shape_draw(character->shapes[draw_action + 6], frame, xx, yy - off);
+            } else {
+                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
+            }
         } else {
-            int off = character->shapes[draw_action]->pixmaps[frame]->width;
-            shape_draw(character->shapes[draw_action + 6], frame, xx, yy + off);
+            if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
+                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
+            } else {
+                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                shape_draw(character->shapes[draw_action + 6], frame, xx, yy + off);
+            }
         }
-#else
-        if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
-            int off = character->shapes[draw_action]->pixmaps[frame]->height;
-            shape_draw(character->shapes[draw_action + 6], frame, xx, yy - off);
-        } else {
-            int off = character->shapes[draw_action]->pixmaps[frame]->width;
-            shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
-        }
-#endif
     }
 }
 

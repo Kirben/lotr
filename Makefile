@@ -16,7 +16,7 @@ HQX_INCLUDE = .
 USE_HQX = 0
 hqx_candidates := /usr/include /usr/include/hqx /usr/local/include /usr/local/include/hqx
 hqx_headers := $(foreach dir,$(hqx_candidates),$(wildcard $(dir)/hqx.h))
-ifneq "$(hqx_headers)" ""
+ifneq ($(strip $(hqx_headers)),)
   USE_HQX = 1
   HQX_INCLUDE = $(dir $(firstword $(hqx_headers)))
 endif
@@ -35,8 +35,8 @@ else
   SDL_CFLAGS := $(shell pkg-config sdl --cflags)
   SDL_LDFLAGS := $(shell pkg-config sdl --libs $(STATIC) )
 endif
-XML_CFLAGS := $(shell xml2-config --cflags)
-XML_LDFLAGS := $(shell xml2-config --libs $(STATIC) )
+XML_CFLAGS := $(shell pkg-config libxml-2.0 --cflags)
+XML_LDFLAGS := $(shell pkg-config libxml-2.0 --libs $(STATIC))
 
 INCLUDES = $(SDL_CFLAGS) $(XML_CFLAGS)
 LIBRARIES = $(SDL_LDFLAGS) $(XML_LDFLAGS)
@@ -45,8 +45,10 @@ CCPARAMS = $(CFLAGS) $(INCLUDES) $(DEFINITIONS)
 
 ifeq ($(USE_SDL_MIXER),1)
   ifeq ($(SDL_VERSION),2)
+    INCLUDES += $(shell pkg-config SDL2_mixer --cflags)
     LIBRARIES += $(shell pkg-config SDL2_mixer --libs $(STATIC))
   else
+    INCLUDES += $(shell pkg-config SDL_mixer --cflags)
     LIBRARIES += $(shell pkg-config SDL_mixer --libs $(STATIC))
   endif
 endif

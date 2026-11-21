@@ -31,6 +31,7 @@
 
 #include "character.h"
 #include "spot.h"
+#include "utils.h"
 
 /* starts a new game */
 extern void game_new(void);
@@ -153,10 +154,8 @@ extern int game_get_moving(void);
 /* set if party is following leader */
 extern void game_set_follow(int follow);
 
-#ifdef TTT
 /* convert vol. I characters to vol. II */
 extern void game_convert(int game_id);
-#endif
 
 
 #endif /* _GAME_H */

@@ -32,7 +32,7 @@
 #include "spot.h"
 
 
-extern char *ph_data_directory(void);
+extern const char *ph_data_directory(void);
 
 extern void ph_init_spot(CommandSpot spot, int map, int x, int y, int w,
                          int h);

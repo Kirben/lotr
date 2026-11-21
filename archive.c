@@ -39,6 +39,32 @@
 #define BUFSIZE 200000
 Uint8 buffer[BUFSIZE];
 
+int
+archive_index_matches(FILE *index, long data_size, int length_index)
+{
+    const int width = length_index ? 2 : 4;
+    const long size = lotr_filelen(index);
+    Uint32 end = 0;
+    Uint8 entry[4];
+
+    if (data_size <= 0 || (Uint64)data_size > SDL_MAX_SINT32 ||
+        size < (length_index ? width : 2 * width) || size % width != 0)
+        return 0;
+    for (long i = 0; i < size; i += width) {
+        if (fread(entry, 1, width, index) != (size_t)width)
+            return 0;
+        Uint32 value = entry[0] | (Uint32)entry[1] << 8;
+        if (length_index)
+            value += end;
+        else
+            value |= (Uint32)entry[2] << 16 | (Uint32)entry[3] << 24;
+        if ((!length_index && i == 0 && value != 0) ||
+            value < end || value > (Uint32)data_size)
+            return 0;
+        end = value;
+    }
+    return !length_index || end == (Uint32)data_size;
+}
 
 /*
   opens idx'ed archive file

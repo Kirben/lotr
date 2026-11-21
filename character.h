@@ -43,12 +43,10 @@
 #define CHARACTER_STAY        5
 
 
-#ifdef CD_VERSION
 #define CD_NORTH   1
 #define CD_EAST    2
 #define CD_SOUTH   4
 #define CD_WEST    8
-#endif
 
 #define CHARACTERS_NUM     240
 
@@ -107,10 +105,8 @@ extern void characters_save(xmlNodePtr node);
 /* load characters */
 extern void characters_load(xmlNodePtr node);
 
-#ifdef TTT
 /* convert character */
 extern void character_convert(xmlNodePtr node, int index);
-#endif
 
 /* character type exists*/
 extern int character_exists(int i);

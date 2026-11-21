@@ -11,6 +11,8 @@ DEFINITIONS = -DPREFIX=\"$(PREFIX)\"
 
 ifeq ($(SDL_VERSION),2)
   LOTR_SDL_OBJ = lotr_sdl2.o
+  SELECTOR_OBJ = selector.o
+  DEFINITIONS += -DLOTR_SDL2_SELECTOR
 else
   LOTR_SDL_OBJ = lotr_sdl.o
 endif
@@ -47,16 +49,20 @@ endif
 
 all: lotr
 
+.PHONY: all clean
 clean:
 	rm -f *.o *~ core.* pythonspot.c playcartoon lotr lotr.static \
-		pythonspot.pxi pythonspot.h playav
+		pythonspot.pxi pythonspot.h playav lotr.exe playcartoon.exe playav.exe
 
 
-lotr: $(OBJFILES) lotr.o
-	$(LD) $(OBJFILES) $(LIBRARIES) lotr.o -o lotr
+lotr: $(OBJFILES) $(SELECTOR_OBJ) lotr.o
+	$(LD) $(OBJFILES) $(SELECTOR_OBJ) lotr.o $(LIBRARIES) -o lotr
 
-lotr.static: $(OBJFILES) lotr.o
-	$(LD_STATIC) $(OBJFILES) $(STATIC_LIBRARIES) lotr.o -o lotr.static
+lotr.static: $(OBJFILES) $(SELECTOR_OBJ) lotr.o
+	$(LD_STATIC) $(OBJFILES) $(SELECTOR_OBJ) lotr.o $(STATIC_LIBRARIES) -o lotr.static
+
+selector.o: selector.h selector_art.h selector_files.h
+lotr.o: selector.h
 
 
 playcartoon: $(PLAYCARTOONOBJ) playcartoon.o

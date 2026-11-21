@@ -36,11 +36,145 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <math.h>
+#include <errno.h>
+#include <ctype.h>
+#ifdef WIN32
+#include <windows.h>
+#include <wchar.h>
+#endif
 
 #define HOME_DIR_STR "$HOME/.lotr/"
 
-char lotr_filename[1024];
+char lotr_filename[LOTR_PATH_CAPACITY];
 
+#if defined(WIN32)
+#  define EDITION_ROOT PREFIX
+#  define STANDARD_DIRECTORY EDITION_ROOT "/lotr"
+#  define DEMO_DIRECTORY PREFIX "/demo"
+#elif defined(AMIGA_OS4)
+#  define EDITION_ROOT PREFIX "/lotr"
+#  define STANDARD_DIRECTORY EDITION_ROOT
+#  define DEMO_DIRECTORY PREFIX "/"
+#else
+#  define EDITION_ROOT PREFIX "/share/games/lotr"
+#  define STANDARD_DIRECTORY EDITION_ROOT
+#  define DEMO_DIRECTORY "./"
+#endif
+
+static const LotrEdition editions[] = {
+    {"standard", "The Lord of the Rings, Vol. I - Standard DOS",
+     STANDARD_DIRECTORY, LOTR_INTRO_CARTOON, LOTR_AUDIO_ARCHIVE, 1, LOTR_DATA_STANDARD},
+    {"enhanced-cd", "The Lord of the Rings, Vol. I - Enhanced CD",
+     EDITION_ROOT "/cd", LOTR_INTRO_CD, LOTR_AUDIO_CD, 1, LOTR_DATA_ENHANCED_CD},
+    {"two-towers", "The Lord of the Rings, Vol. II - The Two Towers",
+     EDITION_ROOT "/towers", LOTR_INTRO_CARTOON, LOTR_AUDIO_SILENT, 2, LOTR_DATA_TWO_TOWERS},
+    {"demo", "The Lord of the Rings, Vol. I - Demo",
+     DEMO_DIRECTORY, LOTR_INTRO_DEMO, LOTR_AUDIO_ARCHIVE, 1, LOTR_DATA_DEMO},
+};
+
+#ifdef DEMO
+#  define DEFAULT_EDITION LOTR_DATA_DEMO
+#else
+#  define DEFAULT_EDITION LOTR_DATA_STANDARD
+#endif
+
+static const LotrEdition *edition_profile = &editions[DEFAULT_EDITION];
+static const char *configured_data_dir;
+static const char *configured_movie_dir;
+
+const LotrEdition *
+lotr_current_edition(void)
+{
+    return edition_profile;
+}
+
+const LotrEdition *
+lotr_edition_at(LotrDataFormat format)
+{
+    return (unsigned int)format <= LOTR_DATA_DEMO ? &editions[format] : NULL;
+}
+
+int
+lotr_configure_edition(const char *edition, const char *data_dir,
+                       const char *movie_dir)
+{
+    const LotrEdition *profile = &editions[DEFAULT_EDITION];
+    if (edition) {
+#ifdef DEMO
+        int first = LOTR_DATA_DEMO, last = LOTR_DATA_DEMO;
+#else
+        int first = LOTR_DATA_STANDARD, last = LOTR_DATA_TWO_TOWERS;
+#endif
+        profile = NULL;
+        for (int i = first; i <= last; ++i)
+            if (strcmp(edition, editions[i].key) == 0)
+                profile = &editions[i];
+        if (!profile) {
+            fprintf(stderr, "lotr: unknown edition '%s'\n", edition);
+            return 0;
+        }
+    }
+    if ((data_dir && !*data_dir) || (movie_dir && !*movie_dir)) {
+        fprintf(stderr, "lotr: asset folder paths cannot be empty\n");
+        return 0;
+    }
+    if (movie_dir && profile->intro != LOTR_INTRO_CD) {
+        fprintf(stderr, "lotr: --movie-dir requires the Enhanced CD edition\n");
+        return 0;
+    }
+    edition_profile = profile;
+    configured_data_dir = data_dir;
+    configured_movie_dir = movie_dir;
+    return 1;
+}
+
+char *
+lotr_save_filename(int volume, int slot)
+{
+    char name[32];
+    snprintf(name, sizeof(name), "%s.%d", volume == 2 ? "savegame2" : "savegame", slot);
+    return lotr_homedir_filename(name);
+}
+
+static FILE *
+open_asset_path(const char *path, const char *mode)
+{
+#ifdef WIN32
+    wchar_t wide_path[LOTR_PATH_CAPACITY];
+    wchar_t wide_mode[8];
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                            wide_path, LOTR_PATH_CAPACITY) ||
+        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, mode, -1, wide_mode, 8)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    return _wfopen(wide_path, wide_mode);
+#else
+    return fopen(path, mode);
+#endif
+}
+
+static FILE *
+open_from_directory(const char *directory, const char *path, const char *mode)
+{
+    int length = snprintf(lotr_filename, sizeof(lotr_filename), "%s/%s",
+                          directory, path);
+    if (length < 0 || (size_t)length >= sizeof(lotr_filename)) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    FILE *file = open_asset_path(lotr_filename, mode);
+    if (file || errno != ENOENT || strcmp(mode, "rb") != 0)
+        return file;
+
+    /* DOS CD images commonly extract with uppercase filenames. */
+    for (char *ch = lotr_filename + strlen(directory) + 1; *ch; ++ch)
+        *ch = (char)toupper((unsigned char)*ch);
+    file = open_asset_path(lotr_filename, mode);
+    if (!file)
+        snprintf(lotr_filename, sizeof(lotr_filename), "%s/%s", directory, path);
+    return file;
+}
 
 /*
   allocates memory, exits on error
@@ -123,24 +257,20 @@ lotr_homedir_filename(const char *name)
 FILE *
 lotr_fopen(const char *path, const char *mode)
 {
-    FILE *result;
-
-    lotr_homedir_filename(path);
-
-    result = fopen(lotr_filename, mode);
+    FILE *result = NULL;
+    if (!configured_data_dir || mode[0] != 'r' || strchr(mode, '+'))
+        result = fopen(lotr_homedir_filename(path), mode);
 
     if (result != NULL)
         return result;
 
-    if (mode[0] == 'w') {
+    if (mode[0] == 'w' ||
+        (configured_data_dir && (mode[0] != 'r' || strchr(mode, '+')))) {
         perror("can not write to directory " HOME_DIR_STR);
         exit(1);
     }
 
-    snprintf(lotr_filename, sizeof(lotr_filename), "%s/%s", DATA_DIRECTORY,
-             path);
-
-    result = fopen(lotr_filename, mode);
+    result = open_from_directory(lotr_data_directory(), path, mode);
 
     if (result == NULL) {
         char message[2048];
@@ -152,6 +282,18 @@ lotr_fopen(const char *path, const char *mode)
     return result;
 }
 
+FILE *
+lotr_open_movie(const char *path)
+{
+    if (!configured_movie_dir)
+        return lotr_fopen(path, "rb");
+    FILE *file = open_from_directory(configured_movie_dir, path, "rb");
+    if (!file) {
+        perror(lotr_filename);
+        exit(1);
+    }
+    return file;
+}
 
 
 /*
@@ -161,27 +303,47 @@ lotr_fopen(const char *path, const char *mode)
 int
 lotr_file_exists(const char *path)
 {
-    FILE *testfile;
-
-    lotr_homedir_filename(path);
-
-    testfile = fopen(lotr_filename, "rb");
+    FILE *testfile = configured_data_dir ? NULL :
+        fopen(lotr_homedir_filename(path), "rb");
 
     if (testfile != NULL) {
         fclose(testfile);
         return 1;
     }
 
-    snprintf(lotr_filename, sizeof(lotr_filename), "%s/%s", DATA_DIRECTORY,
-             path);
-
-    testfile = fopen(lotr_filename, "rb");
+    testfile = open_from_directory(lotr_data_directory(), path, "rb");
     if (testfile != NULL) {
         fclose(testfile);
         return 1;
     }
 
     return 0;
+}
+
+FILE *
+lotr_try_open_asset(const char *path, int movie)
+{
+    FILE *file = NULL;
+    if (movie && configured_movie_dir) {
+        file = open_from_directory(configured_movie_dir, path, "rb");
+    } else {
+        if (!configured_data_dir)
+            file = fopen(lotr_homedir_filename(path), "rb");
+        if (!file)
+            file = open_from_directory(lotr_data_directory(), path, "rb");
+    }
+    return file;
+}
+
+long
+lotr_asset_size(const char *path, int movie)
+{
+    FILE *file = lotr_try_open_asset(path, movie);
+    if (!file)
+        return -1;
+    long size = lotr_filelen(file);
+    fclose(file);
+    return size;
 }
 
 
@@ -409,8 +571,8 @@ lotr_load_prop_field(xmlNodePtr node, char *name, Uint8 *value, int maxlen)
 /*
   return data directory
 */
-char *
+const char *
 lotr_data_directory(void)
 {
-    return DATA_DIRECTORY;
+    return configured_data_dir ? configured_data_dir : edition_profile->default_data_dir;
 }

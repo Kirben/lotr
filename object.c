@@ -26,18 +26,14 @@
 *****************************************************************************/
 
 #include "lotr.h"
+#include "utils.h"
 #include <string.h>
 
 
 #include "object_names.h"
 
-#ifndef TTT
 #include "object_prices.h"
-char **object_names = object_names1;
-#else
 #include "object_names_ttt.h"
-char **object_names = object_names2;
-#endif
 
 
 /*
@@ -49,7 +45,8 @@ object_name(int index)
 {
     if (index < 0 || index > 0xf6)
         return "";
-    return object_names[index];
+    return lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ?
+        object_names2[index] : object_names1[index];
 }
 
 
@@ -61,18 +58,12 @@ int
 object_price(int index)
 {
 
-#ifndef TTT
-
-    if (index < 0x60 || index >= 0x100)
+    if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ||
+        index < 0x60 || index >= 0x100)
         return 255;
 
     return object_prices[index - 0x60];
 
-#else
-
-    return 255;
-
-#endif
 }
 
 /*
@@ -166,10 +157,8 @@ object_weapon_skill(int index)
         case 2:                /* sword */
             return 0x41;
 
-#ifdef TTT
         case 3:                /* staff */
-            return 0x44;
-#endif
+            return lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ? 0x44 : 0;
 
         case 4:                /* axe */
             return 0x42;
@@ -177,10 +166,8 @@ object_weapon_skill(int index)
         case 5:                /* mace */
             return 0x43;
 
-#ifndef TTT
         case 7:                /* flail */
-            return 0x44;
-#endif
+            return lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS ? 0 : 0x44;
 
         case 8:                /* bow */
             return 0x45;
@@ -470,7 +457,6 @@ object_shield_to_hit(int index)
 }
 
 
-#ifdef TTT
 /*
   return if object can be transfered from vol. I to vol. II
 */
@@ -482,4 +468,3 @@ object_transferable(int index)
         return 0;
     return !strcmp(object_names1[index], object_names2[index]);
 }
-#endif

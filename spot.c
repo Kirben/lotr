@@ -44,9 +44,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef CD_VERSION
 #include "av.h"
-#endif
 
 
 #define IGNORE_UNKNOWN 0
@@ -135,22 +133,10 @@
 #define COMMAND_CAN_NOT_MOVE    0x31
 #define COMMAND_CAN_MOVE        0x30
 
-#ifdef TTT
-#define COMMAND_ACTIVATE_PARTY  0x42
-#else
-#define COMMAND_UNKNOWN42	0x42
-#endif
-
-#define COMMAND_02              0x02
-#ifdef TTT
-#define COMMAND_43              0x43
-#define COMMAND_END_OF_GAME     0x4c
-#define COMMAND_IF_PARTY_ACTIVE 0x48
-#else
+#define COMMAND_UNKNOWN42       0x42
 #define COMMAND_UNKNOWNg        0x48
 #define COMMAND_UNKNOWNf        0x4c
-#define COMMAND_END_OF_GAME     0x43
-#endif
+#define COMMAND_02              0x02
 #define COMMAND_47              0x47
 
 #define COMMAND_UNKNOWN1        0x32
@@ -166,11 +152,35 @@
 #define COMMAND_UNKNOWNn        0xc7
 
 
+/* Some opcode bytes mean different things in the two games. */
+enum {
+    COMMAND_ACTIVATE_PARTY = 0x100,
+    COMMAND_43,
+    COMMAND_IF_PARTY_ACTIVE,
+    COMMAND_END_OF_GAME
+};
+
+static int
+spot_command(int opcode, int two_towers)
+{
+    switch (opcode) {
+        case 0x42:
+            return two_towers ? COMMAND_ACTIVATE_PARTY : opcode;
+        case 0x43:
+            return two_towers ? COMMAND_43 : COMMAND_END_OF_GAME;
+        case 0x48:
+            return two_towers ? COMMAND_IF_PARTY_ACTIVE : opcode;
+        case 0x4c:
+            return two_towers ? COMMAND_END_OF_GAME : opcode;
+        default:
+            return opcode;
+    }
+}
+
 Uint8 *spot_objects;
 Uint8 *buy_objects;
 
 
-#ifdef TTT
 char *spot_chapter_texts[15] = {
     "Meanwhile Frodo and Sam are descending the cliffs around the Dead Marshes.",
     "While others face danger, far away, the Ringbearer treks through an even more perilous country.",
@@ -190,12 +200,9 @@ char *spot_chapter_texts[15] = {
 };
 
 static int end_game_text_displayed = 0;
-#endif
 
 
-#ifdef CD_VERSION
-
-int
+static int
 cddir_to_dir(int dir)
 {
     switch (dir) {
@@ -214,26 +221,12 @@ cddir_to_dir(int dir)
     return CHARACTER_UP;
 }
 
-int
-dir_to_cddir(int dir)
+static int
+spot_decode_direction(int direction)
 {
-    switch (dir) {
-        case CHARACTER_UP:
-            return CD_NORTH;
-        case CHARACTER_RIGHT:
-            return CD_EAST;
-        case CHARACTER_DOWN:
-            return CD_SOUTH;
-        case CHARACTER_LEFT:
-            return CD_WEST;
-        case 0xff:
-            return 0xff;
-    }
-    /* error return something sensible */
-    return CD_NORTH;
+    return lotr_current_edition()->data_format == LOTR_DATA_ENHANCED_CD ?
+        cddir_to_dir(direction) : direction;
 }
-
-#endif
 
 
 
@@ -293,33 +286,31 @@ spot_init_commands(CommandSpot *spot)
     int unknown = 0;
     int level = 0;
     int next_level = 0;
-#ifdef TTT
     int negative_level = 0;
-#endif
     int last_commands_num;
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int two_towers = format == LOTR_DATA_TWO_TOWERS;
+    int max_commands = two_towers ? SPOT_MAX_COMMANDS : 128;
 
     i = spot->headersize;
     spot->not_parsed = 0;
     spot->commands_num = 0;
 
     /* we have not decoded DEMO spots */
-#ifdef DEMO
-    if (1)
+    if (format == LOTR_DATA_DEMO)
         return;
-#endif
 
 new_parsing:
     last_commands_num = spot->commands_num;
     unknown = 0;
-    while (i < spot->data_size && n < SPOT_MAX_COMMANDS) {
+    while (i < spot->data_size && n < max_commands) {
         spot->command_start[n] = i;
-        switch (spot->data[i]) {
+        switch (spot_command(spot->data[i], two_towers)) {
 
             case COMMAND_UNKNOWNl:
                 i = spot->data_size;
                 break;
 
-#ifdef TTT
             case COMMAND_43:
                 spot->building =
                     map_get_building(spot->map, readint(spot->data + i + 1),
@@ -327,7 +318,6 @@ new_parsing:
                 spot->floor = spot->data[i + 7];
                 i += 8;
                 break;
-#endif
 
             case COMMAND_UNKNOWN9:
                 i += 6;
@@ -343,18 +333,14 @@ new_parsing:
 
             case COMMAND_UNKNOWNd:
             case COMMAND_UNKNOWNc:
-#ifndef TTT
             case COMMAND_UNKNOWNg:
-#endif
                 i += 2;
                 break;
 
             case COMMAND_UNKNOWN1:
             case COMMAND_UNKNOWN7:
             case COMMAND_UNKNOWNe:
-#ifndef TTT
             case COMMAND_UNKNOWNf:
-#endif
             case COMMAND_UNKNOWNi:
             case COMMAND_UNKNOWNn:
                 i += 1;
@@ -387,14 +373,7 @@ new_parsing:
                 break;
 
             case COMMAND_NPC_INIT:
-#ifndef TTT
-                i += 4;
-#else
-                if (spot->data[i + 2] == 0)
-                    i += 5;
-                else
-                    i += 4;
-#endif
+                i += two_towers && spot->data[i + 2] == 0 ? 5 : 4;
                 break;
 
 
@@ -413,7 +392,6 @@ new_parsing:
                 i += 3;
                 break;
 
-#ifdef TTT
             case COMMAND_IF_PARTY_ACTIVE:
                 i += 2;
                 break;
@@ -421,26 +399,16 @@ new_parsing:
             case COMMAND_ACTIVATE_PARTY:
                 i += 3;
                 break;
-#else
             case COMMAND_UNKNOWN42:
                 i += 1;
                 break;
-#endif
 
             case COMMAND_SET_SILVER:
-#ifndef TTT
-                i += 3;
-#else
-                i += 2;
-#endif
+                i += two_towers ? 2 : 3;
                 break;
 
             case COMMAND_NPC_RECRUIT:
-#ifndef TTT
-                i += 2;
-#else
-                i += 3;
-#endif
+                i += two_towers ? 3 : 2;
                 break;
 
             case COMMAND_DISABLE_SPOT:
@@ -574,13 +542,12 @@ unknown_command:
             spot->commands_num = n;
             spot->not_parsed = 1;
             level = 0;
-#ifndef TTT
-            spot_print(spot);
-            fprintf(stderr, "lotr: error: negative level\n");
-            exit(1);
-#else
+            if (!two_towers) {
+                spot_print(spot);
+                fprintf(stderr, "lotr: error: negative level\n");
+                exit(1);
+            }
             negative_level = 1;
-#endif
         }
 
         spot->command_level[n] = level;
@@ -620,23 +587,19 @@ unknown_command:
         }
     }
 
-#ifdef TTT
     if (negative_level) {
         spot_print(spot);
         fprintf(stderr, "lotr: error: negative level\n");
         return;
     }
-#endif
 
     if (i < spot->data_size) {
         fprintf(stderr, "lotr: too many commands in the spot\n");
         spot->not_parsed = 1;
         spot_print(spot);
-#ifndef TTT
-        exit(1);
-#else
+        if (!two_towers)
+            exit(1);
         return;
-#endif
     }
 
     if (!unknown && i > spot->data_size) {
@@ -659,10 +622,9 @@ unknown_command:
         spot->not_parsed = 1;
         spot_print(spot);
         fprintf(stderr, "lotr: spot was not parsed completely\n");
-#ifndef CD_VERSION
         /* TODO remove CDHACK */
-        exit(1);
-#endif
+        if (lotr_current_edition()->data_format != LOTR_DATA_ENHANCED_CD)
+            exit(1);
     }
 #ifdef DEBUG
     spot_print(spot);
@@ -686,36 +648,28 @@ spot_parse(Uint8 *data, int size, CommandSpot *spots[], int *spots_num)
     CommandSpot *spot;
 
 
-#ifndef TTT
-#ifndef CD_VERSION
-    if (size <= 0x100)
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    i = format == LOTR_DATA_ENHANCED_CD || format == LOTR_DATA_TWO_TOWERS ?
+        0x300 : 0x100;
+    if (size <= i)
         goto corrupted;
-    i = 0x100;
-#else
-    if (size <= 0x300)
-        goto corrupted;
-    i = 0x300;
-#endif
-#else
-    if (size <= 0x300)
-        goto corrupted;
-    i = 0x300;
-#endif
     n = 0;
 
     while (i < size) {
+        if (size - i < 2)
+            goto corrupted;
         s = readint(data + i);
         if (s == 0xffff)
             break;
-        if (i + s > size)
+        if (s < 5 || s > size - i || n >= MAX_COMMAND_SPOTS)
+            goto corrupted;
+
+        int header_size = readint(data + i + 2);
+        if (header_size < 5 || header_size > s)
             goto corrupted;
 
         spot = lotr_malloc(sizeof(CommandSpot));
-
-        spot->headersize = readint(data + i + 2);
-        if (spot->headersize > s)
-            goto corrupted;
-
+        spot->headersize = header_size;
         spot->pythonspot = 0;
 
         spot->map = data[i + 4];
@@ -940,9 +894,7 @@ spot_action_to_string(int id)
 static const char *
 spot_direction_to_string(int dir)
 {
-#ifdef CD_VERSION
-    dir = cddir_to_dir(dir);
-#endif
+    dir = spot_decode_direction(dir);
     switch (dir) {
         case CHARACTER_UP:
             return "NORTH";
@@ -1011,11 +963,12 @@ spot_get_string(CommandSpot *spot)
         spot_string_print("%02x ", spot->data[i]);
     spot_string_print("\n");
 
+    int two_towers = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS;
     for (k = 0; k < spot->commands_num; ++k) {
         int command;
 
         i = spot->command_start[k];
-        command = spot->data[i];
+        command = spot_command(spot->data[i], two_towers);
 
         spot_string_print("%04x: ", i + spot->label_start);
         for (j = 0; j < spot->command_level[k] * 2; ++j)
@@ -1032,11 +985,9 @@ spot_get_string(CommandSpot *spot)
             case COMMAND_UNKNOWNe:
             case COMMAND_UNKNOWNi:
             case COMMAND_UNKNOWNm:
-#ifndef TTT
             case COMMAND_UNKNOWNg:
             case COMMAND_UNKNOWNf:
             case COMMAND_UNKNOWN42:
-#endif
 
                 if (k + 1 < spot->commands_num)
                     endcom = spot->command_start[k + 1];
@@ -1107,9 +1058,8 @@ spot_get_string(CommandSpot *spot)
                 spot_string_print("NPC_RECRUIT: %s(%02x)",
                                   spot_character_name(spot->data[i + 1]),
                                   spot->data[i + 1]);
-#ifdef TTT
-                spot_string_print(", %02x", spot->data[i + 2]);
-#endif
+                if (two_towers)
+                    spot_string_print(", %02x", spot->data[i + 2]);
                 break;
 
             case COMMAND_NPC_DISMISS:
@@ -1258,14 +1208,12 @@ spot_get_string(CommandSpot *spot)
                                   spot->data[i + 2], spot->data[i + 3]);
                 break;
 
-#ifdef TTT
             case COMMAND_43:
                 spot_string_print
                     ("COMMAND_43: building=%02x, %02x, %02x, floor=%d\n",
                      spot->building, spot->data[i + 5], spot->data[i + 6],
                      spot->data[i + 7]);
                 break;
-#endif
 
             case COMMAND_47:
                 spot_string_print("COMMAND_47\n");
@@ -1356,13 +1304,12 @@ spot_get_string(CommandSpot *spot)
                 break;
 
             case COMMAND_SET_SILVER:
-#ifndef TTT
-                spot_string_print("SET_SILVER: amount=%04x",
-                                  readint(spot->data + i + 1));
-#else
-                spot_string_print("ADD_SILVER: amount=%02x",
-                                  spot->data[i + 1]);
-#endif
+                if (two_towers)
+                    spot_string_print("ADD_SILVER: amount=%02x",
+                                      spot->data[i + 1]);
+                else
+                    spot_string_print("SET_SILVER: amount=%04x",
+                                      readint(spot->data + i + 1));
                 break;
 
             case COMMAND_OBJECTS_HERE:
@@ -1416,7 +1363,6 @@ spot_get_string(CommandSpot *spot)
                 spot_string_print("DIE");
                 break;
 
-#ifdef TTT
             case COMMAND_IF_PARTY_ACTIVE:
                 spot_string_print("IF_PARTY_ACTIVE %d", spot->data[i + 1]);
                 break;
@@ -1426,7 +1372,6 @@ spot_get_string(CommandSpot *spot)
                                   spot->data[i + 1],
                                   spot_chapter_texts[spot->data[i + 2]]);
                 break;
-#endif
 
             case COMMAND_CAN_NOT_MOVE:
                 spot_string_print("CAN_NOT_MOVE");
@@ -1717,24 +1662,24 @@ spot_continue(CommandSpot *spot)
         return pythonspot_continue(spot->id);
 #endif
 
-    party_size = game_get_party_characters(party);
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int two_towers = format == LOTR_DATA_TWO_TOWERS;
+    int enhanced_cd = format == LOTR_DATA_ENHANCED_CD;
 
     while (spot->pos < spot->commands_num) {
         i = spot->command_start[spot->pos];
 
-        switch (spot->data[i]) {
+        switch (spot_command(spot->data[i], two_towers)) {
 
             case COMMAND_02:
             case COMMAND_47:
                 spot->pos++;
                 break;
 
-#ifdef TTT
             case COMMAND_43:
                 spot->pos++;
                 spot_if_result(spot, 1);
                 break;
-#endif
 
             case COMMAND_UNKNOWN1:
             case COMMAND_UNKNOWN6:
@@ -1742,42 +1687,23 @@ spot_continue(CommandSpot *spot)
                 break;
 
 
-            case COMMAND_NPC_INIT:
+            case COMMAND_NPC_INIT: {
+                int type = spot->data[i + 2];
+                int value = spot->data[i + 3];
+                if (type == 0xa)
+                    value = spot_decode_direction(value);
                 spot->pos++;
                 if (spot->data[i + 1] == 0xf0) {
+                    party_size = game_get_party_characters(party);
                     for (j = 0; j < party_size; ++j)
-#ifdef CD_VERSION
-                        /* cd version uses different direction codes */
-                        if (spot->data[i + 2] == 0xa)   /* direction */
-                            character_command_npc_init(party[j],
-                                                       spot->data[i + 2],
-                                                       cddir_to_dir(spot->data
-                                                                    [i + 3]));
-                        else
-#endif
-                            character_command_npc_init(party[j],
-                                                       spot->data[i + 2],
-                                                       spot->data[i + 3]);
+                        character_command_npc_init(party[j], type, value);
                     break;
                 }
-
                 character = spot_character_get(spot->data[i + 1]);
-
-                if (character) {
-#ifdef CD_VERSION
-                    /* cd version uses different direction codes */
-                    if (spot->data[i + 2] == 0xa)       /* direction */
-                        character_command_npc_init(character,
-                                                   spot->data[i + 2],
-                                                   cddir_to_dir(spot->data
-                                                                [i + 3]));
-                    else
-#endif
-                        character_command_npc_init(character,
-                                                   spot->data[i + 2],
-                                                   spot->data[i + 3]);
-                }
+                if (character)
+                    character_command_npc_init(character, type, value);
                 break;
+            }
 
             case COMMAND_NPC_SET_NAME:
                 spot->pos++;
@@ -1819,6 +1745,7 @@ spot_continue(CommandSpot *spot)
             case COMMAND_NPC_CHANGE_STAT:
                 spot->pos++;
                 if (spot->data[i + 1] == 0xf0) {
+                    party_size = game_get_party_characters(party);
                     for (j = 0; j < party_size; ++j)
                         spot_change_stat(party[j], spot->data[i + 2],
                                          spot->data[i + 3],
@@ -1836,16 +1763,10 @@ spot_continue(CommandSpot *spot)
             case COMMAND_NPC_MOVE:
                 lotr_input_disable();
                 lotr_reset_keyboard();
-#ifndef CD_VERSION
-                if (map_character_move
-                    (spot->data[i + 1], readint(spot->data + i + 3),
-                     readint(spot->data + i + 5), spot->data[i + 2]))
-#else
                 if (map_character_move
                     (spot->data[i + 1], readint(spot->data + i + 3),
                      readint(spot->data + i + 5),
-                     cddir_to_dir(spot->data[i + 2])))
-#endif
+                     spot_decode_direction(spot->data[i + 2])))
                     return 1;
                 else
                     spot->pos++;
@@ -1869,8 +1790,11 @@ spot_continue(CommandSpot *spot)
                 }
                 if (spot->data[i + 1] < 0xf0) {
                     character = character_get(spot->data[i + 1]);
-                    character->party_id = spot->data[i + 2];
-                    game_recruit(character_get(spot->data[i + 1]), 1);
+                    if (!game_in_party(character)) {
+                        if (two_towers)
+                            character->party_id = spot->data[i + 2];
+                        game_recruit(character, 1);
+                    }
                 }
                 break;
 
@@ -1916,36 +1840,20 @@ spot_continue(CommandSpot *spot)
                     character = spot_character_get(spot->data[i + 8]);
                 if (spot->data[i + 8] == 0xf0
                     || character == game_get_leader()) {
-#ifndef CD_VERSION
                     game_leader_teleport(spot->data[i + 1],
                                          readint(spot->data + i + 3),
                                          readint(spot->data + i + 5),
-                                         spot->data[i + 2],
+                                         spot_decode_direction(spot->data[i + 2]),
                                          spot->data[i + 7]);
-#else
-                    game_leader_teleport(spot->data[i + 1],
-                                         readint(spot->data + i + 3),
-                                         readint(spot->data + i + 5),
-                                         cddir_to_dir(spot->data[i + 2]),
-                                         spot->data[i + 7]);
-#endif
                     spot_if_result(spot, 1);
                     return 1;
                 }
                 if (character != NULL) {
-#ifndef CD_VERSION
                     map_character_teleport(character, spot->data[i + 1],
                                            readint(spot->data + i + 3),
                                            readint(spot->data + i + 5),
-                                           spot->data[i + 2],
+                                           spot_decode_direction(spot->data[i + 2]),
                                            spot->data[i + 7]);
-#else
-                    map_character_teleport(character, spot->data[i + 1],
-                                           readint(spot->data + i + 3),
-                                           readint(spot->data + i + 5),
-                                           cddir_to_dir(spot->data[i + 2]),
-                                           spot->data[i + 7]);
-#endif
                     spot_if_result(spot, 1);
                     return 1;
                 }
@@ -1980,6 +1888,7 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_IF_PARTY:
                 spot->pos++;
+                party_size = game_get_party_characters(party);
                 if (spot->data[i + 1] == 0xf0) {
                     for (j = 0; j < party_size; ++j)
                         if (spot_if_party
@@ -2051,12 +1960,10 @@ spot_continue(CommandSpot *spot)
                 spot->pos++;
                 j = readint(spot->data + i + 1);
                 spot_objects = map_get_objects() + j;
-#ifdef TTT
-                if (spot->data[i] == COMMAND_OBJECTS_HERE) {
+                if (two_towers && spot->data[i] == COMMAND_OBJECTS_HERE) {
                     gui_message("You see items here you might use.", 0);
                     return 1;
                 }
-#endif
                 break;
 
             case COMMAND_OBJECTS_TO_BUY:
@@ -2066,11 +1973,10 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_SET_SILVER:
                 spot->pos++;
-#ifndef TTT
-                game_set_silver(readint(spot->data + i + 1));
-#else
-                game_add_silver(spot->data[i + 1]);
-#endif
+                if (two_towers)
+                    game_add_silver(spot->data[i + 1]);
+                else
+                    game_set_silver(readint(spot->data + i + 1));
                 break;
 
             case COMMAND_TRUE_THEN:
@@ -2093,15 +1999,9 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_IF_DIRECTION:
                 spot->pos++;
-#ifndef CD_VERSION
                 spot_if_result(spot,
                                game_get_leader()->direction ==
-                               spot->data[i + 1]);
-#else
-                spot_if_result(spot,
-                               game_get_leader()->direction ==
-                               cddir_to_dir(spot->data[i + 1]));
-#endif
+                               spot_decode_direction(spot->data[i + 1]));
                 /* HACK for a crypt under lonely stone in Breeland */
                 if (spot->data[i + 1] == 0x14)
                     spot_if_result(spot, game_get_leader()->direction == CHARACTER_DOWN);
@@ -2161,12 +2061,12 @@ spot_continue(CommandSpot *spot)
                 return 1;
 
             case COMMAND_CARTOON:
-#ifndef DEMO
-                snprintf(name, sizeof(name), "cart%d", spot->data[i + 1] + 1);
+                if (format == LOTR_DATA_DEMO) {
+                    snprintf(name, sizeof(name), "democrt%d", spot->data[i + 1] + 1);
+                } else {
+                    snprintf(name, sizeof(name), "cart%d", spot->data[i + 1] + 1);
                 play_music();
-#else
-                snprintf(name, sizeof(name), "democrt%d", spot->data[i + 1] + 1);
-#endif
+                }
                 cartoon_play(name);
 
                 if (spot->data[i + 1] + 1 == 11)
@@ -2183,24 +2083,22 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_PLAY_AV:
 
-#ifdef CD_VERSION
+                if (enhanced_cd) {
+                    av_playnum(spot->data[i + 1]);
 
-                av_playnum(spot->data[i + 1]);
+                    graphics_clear_screen();
+                    gui_set_palette();
+                    gui_clear();
+                    map_set_palette();
+                    shapes_set_palette();
 
-                graphics_clear_screen();
-                gui_set_palette();
-                gui_clear();
-                map_set_palette();
-                shapes_set_palette();
-
-                spot->pos++;
-                return 1;
-#else
+                    spot->pos++;
+                    return 1;
+                }
                 fprintf(stderr, "lotr: PLAY_AV command not implemented\n");
-                fprintf(stderr, "(recompile with CD_VERSION support)\n");
+                fprintf(stderr, "(requires Enhanced CD data)\n");
                 spot->pos++;
                 break;
-#endif
 
 
             case COMMAND_MAP_FOG:
@@ -2231,13 +2129,8 @@ spot_continue(CommandSpot *spot)
                 character = character_get(spot->data[i + 5]);
                 relative = spot->data[i + 1];
 
-#ifndef CD_VERSION
-                if (spot->data[i + 2] < 5)
-                    character->direction = spot->data[i + 2];
-#else
-                if (spot->data[i + 2] < 9)
-                    character->direction = cddir_to_dir(spot->data[i + 2]);
-#endif
+                if (spot->data[i + 2] < (enhanced_cd ? 9 : 5))
+                    character->direction = spot_decode_direction(spot->data[i + 2]);
                 /* this is probably not right
                    character->life=character->end*spot->data[i+3]/100;
                  */
@@ -2319,12 +2212,12 @@ spot_continue(CommandSpot *spot)
                 combat_start();
                 return 1;
 
-#ifdef TTT
             case COMMAND_EXIT_BUILDING:
+                if (!two_towers)
+                    goto unknown_execution_command;
                 spot->pos++;
                 map_exit_building();
                 break;
-#endif
 
 
             case COMMAND_DIE:
@@ -2335,16 +2228,13 @@ spot_continue(CommandSpot *spot)
                 return 0;
 
             case COMMAND_END_OF_GAME:
-#ifdef TTT
-                if (!end_game_text_displayed) {
+                if (two_towers && !end_game_text_displayed) {
                     gui_message("The game ends here. Now, go grab the books and read the rest of the story.", 0);
                     end_game_text_displayed = 1;
                     return 1;
                 }
-#endif
                 exit(0);
 
-#ifdef TTT
             case COMMAND_IF_PARTY_ACTIVE:
                 spot->pos++;
                 spot_if_result(spot, game_get_leader()->party_id == spot->data[i + 1]);
@@ -2355,9 +2245,9 @@ spot_continue(CommandSpot *spot)
                 game_party_activate(spot->data[i + 1]);
                 gui_book(spot_chapter_texts[j]);
                 return 0;
-#endif
 
             default:
+unknown_execution_command:
                 spot_print(spot);
                 fprintf(stderr, "lotr: unknown spot command %02x\n",
                         spot->data[i]);
@@ -2409,10 +2299,8 @@ spot_action(CommandSpot *spot, int type, int what, int on_who)
     for (i = 0; i < spot->data[index + 1]; ++i) {
         s_type = spot->data[index + 2 + i * 5];
         s_what = spot->data[index + 2 + i * 5 + 1];
-#ifdef CD_VERSION
         if (s_type == SPOT_ACTION_MOVE)
-            s_what = cddir_to_dir(s_what);
-#endif
+            s_what = spot_decode_direction(s_what);
         s_on_who = spot->data[index + 2 + i * 5 + 2];
 
         if ((s_type == 0xff || s_type == type) &&
@@ -2463,10 +2351,8 @@ spot_has_action(CommandSpot *spot, int type, int what, int on_who)
     for (i = 0; i < spot->data[index + 1]; ++i) {
         s_type = spot->data[index + 2 + i * 5];
         s_what = spot->data[index + 2 + i * 5 + 1];
-#ifdef CD_VERSION
         if (s_type == SPOT_ACTION_MOVE)
-            s_what = cddir_to_dir(s_what);
-#endif
+            s_what = spot_decode_direction(s_what);
         s_on_who = spot->data[index + 2 + i * 5 + 2];
         if ((s_type == 0xff || s_type == type) &&
             (s_what == 0xff || s_what == what) &&

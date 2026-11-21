@@ -31,7 +31,8 @@
 
 
 /* play av */
-extern void av_play(char *name);
+extern void av_play(const char *name);
+extern const char *av_name(int index);
 
 /* play av by number*/
 extern void av_playnum(int num);

@@ -39,53 +39,102 @@
 #include "timing.h"
 #include "utils.h"
 
-#ifdef CD_VERSION
 #include "av.h"
-#endif
+#include "selector.h"
 
 #include <stdlib.h>
+#include <string.h>
 
+static void
+print_usage(FILE *stream, const char *program)
+{
+    fprintf(stream, "Usage: %s [--edition EDITION] [--data-dir DIR] [--movie-dir DIR]\n", program);
+#ifdef DEMO
+    fputs("Edition: demo\n", stream);
+#else
+    fputs("Editions: standard, enhanced-cd, two-towers\n", stream);
+    fputs("--movie-dir is available for Enhanced CD.\n", stream);
+#endif
+#if defined(LOTR_SDL2_SELECTOR) && !defined(DEMO)
+    fputs("Run without options to open the edition selector.\n", stream);
+#endif
+}
 
 
 int
 main(int argc, char *argv[])
 {
     int game_num = 0;
+    const char *edition = NULL;
+    const char *data_dir = NULL;
+    const char *movie_dir = NULL;
+    for (int i = 1; i < argc; ++i) {
+        const char **value;
+        if (strcmp(argv[i], "--help") == 0) {
+            print_usage(stdout, argv[0]);
+            return 0;
+        }
+        if (strcmp(argv[i], "--edition") == 0)
+            value = &edition;
+        else if (strcmp(argv[i], "--data-dir") == 0)
+            value = &data_dir;
+        else if (strcmp(argv[i], "--movie-dir") == 0)
+            value = &movie_dir;
+        else {
+            fprintf(stderr, "lotr: unknown option '%s'\n", argv[i]);
+            print_usage(stderr, argv[0]);
+            return 1;
+        }
+        if (i + 1 == argc || strncmp(argv[i + 1], "--", 2) == 0) {
+            fprintf(stderr, "lotr: missing value for %s\n", argv[i]);
+            return 1;
+        }
+        *value = argv[++i];
+    }
+#if defined(LOTR_SDL2_SELECTOR) && !defined(DEMO)
+    if (argc == 1) {
+        int choice = lotr_select_edition();
+        if (choice <= 0)
+            return choice < 0 ? 1 : 0;
+    } else
+#endif
+    if (!lotr_configure_edition(edition, data_dir, movie_dir))
+        return 1;
+
 
     /* Check if game data is present */
     if (!lotr_file_exists("arts.dat")) {
         fprintf(stderr, "Cannot find file \"arts.dat\"\n");
-        fprintf(stderr, "Please copy game data into the directory \"%s\"\n", DATA_DIRECTORY);
-#ifdef WIN32
-        system("pause");
-#endif
+        fprintf(stderr, "Please copy game data into the directory \"%s\"\n",
+                lotr_data_directory());
         exit(1);
     }
 
     lotr_init();
 
-#ifdef TTT
-    game_num = gui_ttt_start_dialog();
-#endif
+    if (lotr_current_edition()->volume == 2)
+        game_num = gui_ttt_start_dialog();
 
     game_new();
-    if (game_num)
+    if (game_num != 0)
         game_load(game_num);
 
 
 #ifndef DEBUG
     cartoon_show_credits(1);
-#if !DEMO
-#ifndef CD_VERSION
-    if (game_num == 0)
-        cartoon_play("opening");
-#else
-    av_play("sacf");
-    av_play("saqf");
-#endif
-#else
-    cartoon_play("democrt0");
-#endif
+    switch (lotr_current_edition()->intro) {
+        case LOTR_INTRO_CARTOON:
+            if (game_num == 0)
+                cartoon_play("opening");
+            break;
+        case LOTR_INTRO_CD:
+            av_play("sacf");
+            av_play("saqf");
+            break;
+        case LOTR_INTRO_DEMO:
+            cartoon_play("democrt0");
+            break;
+    }
 #endif
 
 

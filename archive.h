@@ -49,6 +49,9 @@ extern Archive *archive_idx_open(const char *name);
 /* opens ndx'ed archive file */
 extern Archive *archive_ndx_open(const char *name);
 
+/* Check archive index structure without starting the game. */
+extern int archive_index_matches(FILE *index, long data_size, int length_index);
+
 /* close archive file */
 extern void archive_close(Archive *archive);
 

@@ -126,10 +126,8 @@ extern void gui_paragraph_question(int num);
 /* shows dialog saying that the player is dead */
 extern void gui_died_show(const char *text, int show_cartoon);
 
-#ifdef TTT
 /* shows a book with the next chapter in TTT */
 extern void gui_book(char *text);
-#endif
 
 /* returns choosed character */
 extern Character *gui_choosed(void);
@@ -147,10 +145,8 @@ extern void gui_player_dead(Character *who, int show_message);
 extern void gui_proceed_frames(void);
 
 
-#ifdef TTT
 /* dialog when starting TTT */
 extern int gui_ttt_start_dialog(void);
-#endif
 
 
 

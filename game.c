@@ -77,9 +77,8 @@ int loaded_map_spots = -1;
 int loaded_map_graphics = -1;
 
 
-#ifndef TTT
 /* map_desc, map_spots+map_texts, map_graphics */
-int game_maps[][4] = { {0x7, 0x0, 0x2},
+static const int fellowship_maps[][3] = { {0x7, 0x0, 0x2},
 {0xf, 0x0, 0xa},
 {0x107, 0x100, 0x2},
 {0x10f, 0x100, 0xa},
@@ -94,8 +93,7 @@ int game_maps[][4] = { {0x7, 0x0, 0x2},
 {0x157, 0x150, 0x122},
 {0x15f, 0x150, 0x13a}
 };
-#else
-int game_maps[][4] = { {0x7, 0x0, 0x2},
+static const int two_towers_maps[][3] = { {0x7, 0x0, 0x2},
 {0xf, 0x0, 0xa},
 {0x107, 0x100, 0x102},
 {0x10f, 0x100, 0x10a},
@@ -112,7 +110,6 @@ int game_maps[][4] = { {0x7, 0x0, 0x2},
 {0x167, 0x160, 0x162},
 {0x16f, 0x160, 0x16a}
 };
-#endif
 
 
 
@@ -200,31 +197,34 @@ game_parse_texts(Archive *archive, int index)
   loads a map
 */
 
+static Archive *
+game_open_map_archive(LotrDataFormat format, int resource)
+{
+    if (format == LOTR_DATA_DEMO)
+        return archive_ndx_open("demo");
+    return archive_ndx_open(resource > 0xff ? "map1" : "map0");
+}
+
 void
 game_load_map(int map)
 {
     Archive *archive;
     int i;
-#ifdef DEMO
-    int only_one_map = 1;
-#else
-    int only_one_map = 0;
-#endif
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int two_towers = format == LOTR_DATA_TWO_TOWERS;
+    const int (*game_maps)[3] = two_towers ? two_towers_maps : fellowship_maps;
+    size_t map_count = two_towers ?
+        sizeof(two_towers_maps) / sizeof(two_towers_maps[0]) :
+        sizeof(fellowship_maps) / sizeof(fellowship_maps[0]);
 
-#ifndef TTT
-    if (map < 0 || map > 13 || !game_maps[map][0]
-        || (only_one_map && map > 0))
-#else
-    if (map < 0 || map > 15 || !game_maps[map][0]
-        || (only_one_map && map > 0))
-#endif
+    if (map < 0 || (size_t)map >= map_count || !game_maps[map][0]
+        || (format == LOTR_DATA_DEMO && map > 0))
     {
         fprintf(stderr, "lotr: not existing map index=%d\n", map);
         exit(1);
     }
-#ifdef TTT
-    map_exit_building();
-#endif
+    if (two_towers)
+        map_exit_building();
 
     graphics_set_window(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
     graphics_clear_screen();
@@ -232,14 +232,7 @@ game_load_map(int map)
     lotr_reset_keyboard();
 
     if (game_maps[map][0] != loaded_map_desc) {
-#ifndef DEMO
-        if (game_maps[map][0] > 0xff)
-            archive = archive_ndx_open("map1");
-        else
-            archive = archive_ndx_open("map0");
-#else
-        archive = archive_ndx_open("demo");
-#endif
+        archive = game_open_map_archive(format, game_maps[map][0]);
         map_set_map(archive, map, game_maps[map][0] % 0x100);
         archive_close(archive);
         loaded_map_desc = game_maps[map][0];
@@ -247,14 +240,7 @@ game_load_map(int map)
 
 
     if (game_maps[map][1] != loaded_map_spots) {
-#ifndef DEMO
-        if (game_maps[map][1] > 0xff)
-            archive = archive_ndx_open("map1");
-        else
-            archive = archive_ndx_open("map0");
-#else
-        archive = archive_ndx_open("demo");
-#endif
+        archive = game_open_map_archive(format, game_maps[map][1]);
 
         game_parse_texts(archive, game_maps[map][1] % 0x100 + 1);
 
@@ -276,14 +262,7 @@ game_load_map(int map)
     game_map_id = map;
 
     if (game_maps[map][2] != loaded_map_graphics) {
-#ifndef DEMO
-        if (game_maps[map][2] > 0xff)
-            archive = archive_ndx_open("map1");
-        else
-            archive = archive_ndx_open("map0");
-#else
-        archive = archive_ndx_open("demo");
-#endif
+        archive = game_open_map_archive(format, game_maps[map][2]);
         map_set_tiles(archive, game_maps[map][2] % 0x100,
                       game_maps[map][2] % 0x100 + 1,
                       game_maps[map][2] % 0x100 + 2,
@@ -326,17 +305,9 @@ game_new(void)
     loaded_map_spots = loaded_map_desc = loaded_map_graphics = -1;
     game_map_id = -1;
 
-#ifndef TTT
-    game_load_map(0);
-#else
-    game_load_map(6);
-#endif
-
-#ifdef DEMO
-    map_set_frame(0x400);
-#else
-    map_set_frame(0x200);
-#endif
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    game_load_map(format == LOTR_DATA_TWO_TOWERS ? 6 : 0);
+    map_set_frame(format == LOTR_DATA_DEMO ? 0x400 : 0x200);
 
 
     game_party_size = 0;
@@ -352,13 +323,12 @@ game_new(void)
     for (i = 0; i < 256; ++i)
         game_registers[i] = 0;
 
-#ifndef TTT
-    /* Frodo is the leader */
-    leader = character_get(0xa0);
-#else
-    leader = NULL;
-    game_party_activate(1);
-#endif
+    if (format == LOTR_DATA_TWO_TOWERS) {
+        leader = NULL;
+        game_party_activate(1);
+    } else {
+        leader = character_get(0xa0); /* Frodo */
+    }
 
     game_recruit(leader, 1);
 
@@ -381,7 +351,7 @@ int
 game_save(int n)
 {
 
-    char name[20];
+    int volume = lotr_current_edition()->volume;
     int i;
 
 
@@ -399,11 +369,7 @@ game_save(int n)
     root = xmlNewNode(NULL, (const xmlChar *)"lotr_savegame");
     xmlDocSetRootElement(doc, root);
 
-#ifndef TTT
-    lotr_save_prop_int(root, "vol", 1);
-#else
-    lotr_save_prop_int(root, "vol", 2);
-#endif
+    lotr_save_prop_int(root, "vol", volume);
 
 
     node = xmlNewNode(NULL, (const xmlChar *)"characters");
@@ -469,13 +435,7 @@ game_save(int n)
     lotr_save_prop_int(node, "map", saved_position_map);
 
 
-#ifndef TTT
-    snprintf(name, sizeof(name), "savegame.%d", n);
-#else
-    snprintf(name, sizeof(name), "savegame2.%d", n);
-#endif
-
-    xmlSaveFormatFileEnc(lotr_homedir_filename(name), doc, "ascii", 1);
+    xmlSaveFormatFileEnc(lotr_save_filename(volume, n), doc, "ascii", 1);
 
     xmlFreeDoc(doc);
 
@@ -487,11 +447,22 @@ game_save(int n)
   load game
 */
 
+static xmlDocPtr
+game_read_save(int volume, int slot)
+{
+    int options = XML_PARSE_NONET;
+#if LIBXML_VERSION >= 21500
+    /* libxml2 2.15 and later require explicit opt-in for gzip input. */
+    options |= XML_PARSE_UNZIP;
+#endif
+    return xmlReadFile(lotr_save_filename(volume, slot), NULL, options);
+}
+
 int
 game_load(int n)
 {
 
-    char name[20];
+    int volume = lotr_current_edition()->volume;
     int i;
     int vol;
 
@@ -502,13 +473,7 @@ game_load(int n)
     xmlNodePtr node;
     xmlNodePtr subnode;
 
-#ifndef TTT
-    snprintf(name, sizeof(name), "savegame.%d", n);
-#else
-    snprintf(name, sizeof(name), "savegame2.%d", n);
-#endif
-
-    doc = xmlParseFile(lotr_homedir_filename(name));
+    doc = game_read_save(volume, n);
     if (doc == NULL)
         return 0;
 
@@ -517,13 +482,8 @@ game_load(int n)
         return 0;
 
     vol = lotr_load_prop_int_default(root, "vol", 1);
-#ifndef TTT
-    if (vol != 1)
+    if (vol != volume)
         return 0;
-#else
-    if (vol != 2)
-        return 0;
-#endif
 
     node = lotr_get_subnode(root, (const xmlChar *)"characters", 1);
     characters_load(node);
@@ -573,6 +533,9 @@ game_load(int n)
     game_moving = lotr_load_prop_int(node, "moving");
     game_follow = lotr_load_prop_int(node, "follow");
 
+    /* TODO: With the bundled Two Towers data, a save can reference slot 16
+       for Aragorn while his state is stored under slot 164. Trace where the
+       runtime ID diverges before changing these references or migrating saves. */
     game_party_size = lotr_load_prop_field(node, "party", buf, 11);
 
     for (i = 0; i < game_party_size; ++i)
@@ -606,7 +569,6 @@ game_load(int n)
 
 
 
-#ifdef TTT
 /*
   convert vol. I characters to vol. II
 */
@@ -614,7 +576,6 @@ game_load(int n)
 void
 game_convert(int game_id)
 {
-    char name[20];
     int vol;
     xmlDocPtr doc;
     xmlNodePtr root;
@@ -624,9 +585,7 @@ game_convert(int game_id)
 
     int party_size;
 
-    snprintf(name, sizeof(name), "savegame.%d", game_id);
-
-    doc = xmlParseFile(lotr_homedir_filename(name));
+    doc = game_read_save(1, game_id);
     if (doc == NULL)
         return;
 
@@ -655,7 +614,6 @@ game_convert(int game_id)
 
 
 }
-#endif
 
 
 
@@ -919,8 +877,8 @@ game_next_frame(void)
 
         character_frame(leader);
 
-#ifdef TTT
-        if (leader->action == CHARACTER_STAY)
+        if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS &&
+            leader->action == CHARACTER_STAY)
 #ifdef ENABLE_CHEATS
             if (!lotr_key_shift() && !lotr_key_ctrl())
 #endif
@@ -977,7 +935,6 @@ exit_found:
                     }
                 }
             }
-#endif
 
         if (game_moving) {
             game_leader_movement();
@@ -1321,11 +1278,11 @@ game_recruit(Character *character, int force)
     character->actived = 1;
 
     character->action = CHARACTER_STAY;
-#ifdef TTT
-    if (character->party_id != leader->party_id)
-        fprintf(stderr, "lotr: WARNING recruiting to a wrong party?\n");
-    character->party_id = leader->party_id;
-#endif
+    if (lotr_current_edition()->volume == 2) {
+        if (character->party_id != leader->party_id)
+            fprintf(stderr, "lotr: WARNING recruiting to a wrong party?\n");
+        character->party_id = leader->party_id;
+    }
 
     game_check_light();
     return 1;

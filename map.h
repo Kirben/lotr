@@ -101,19 +101,17 @@ extern void map_set_palette_resource(Archive *archive, int paletteindex);
 extern void map_set_map(Archive *archive, int id, int mapindex);
 
 
-#ifdef TTT
 /* enter building in TTT */
 extern void map_enter_building(int id);
 
 /* exit building int TTT */
-extern void map_exit_building();
+extern void map_exit_building(void);
 
 /* building enter coordinates */
 extern void map_building_enter_coords(int id, int *x, int *y);
 
 /* get building id */
 extern int map_get_building(int map, int x, int y);
-#endif
 
 /* get map building_id */
 extern int map_get_building_id(void);

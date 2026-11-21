@@ -28,6 +28,7 @@
 
 #include "lotr.h"
 #include "midi.h"
+#include "utils.h"
 #ifdef HAVE_SDL_MIXER
 #include <SDL_mixer.h>
 #endif
@@ -90,16 +91,10 @@ play_midi(Uint8 *data, int size, int loop)
         return;
 
     if (data == NULL || size == 0) {
-#ifdef CD_VERSION
-        return;
-#endif
-
-#ifndef TTT
+        if (lotr_current_edition()->audio != LOTR_AUDIO_ARCHIVE)
+            return;
         fprintf(stderr, "lotr: trying to play an empty midi file\n");
         exit(1);
-#else
-        return;
-#endif
     }
 
     stop_midi();

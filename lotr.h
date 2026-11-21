@@ -33,18 +33,8 @@
 #  define AMIGA_OS4
 #endif
 
-/* define this to compile The Two Towers - not working */
-/* #define TTT */
-
-#ifndef TTT
-/* define this to compile the CD version */
-/* works only with Fellowship of the Ring */
-/* #define CD_VERSION */
-
-/* define this if you want to compile a demo binary */
-/* works only with Fellowship of the Ring */
+/* Define this to compile the standalone Fellowship demo. */
 /* #define DEMO 1 */
-#endif
 
 
 /* uncomment for fullscreen */
@@ -62,38 +52,7 @@
 #define FRAME_TIME 50
 
 #if !defined(PREFIX)
-#  define PREFIX
-#endif
-
-#ifdef DEMO
-#  if defined(WIN32)
-#    define DATA_DIRECTORY PREFIX "/demo"
-#  elif defined(AMIGA_OS4)
-#    define DATA_DIRECTORY PREFIX "/"
-#  else
-#    define DATA_DIRECTORY "./"
-#  endif
-#else
-#  if defined(WIN32)
-#    define GAME_DIRECTORY PREFIX
-#  elif defined(AMIGA_OS4)
-#    define GAME_DIRECTORY PREFIX "/lotr"
-#  else
-#    define GAME_DIRECTORY PREFIX "/share/games/lotr"
-#  endif
-#  ifndef TTT
-#    ifndef CD_VERSION
-#      if defined(WIN32)
-#        define DATA_DIRECTORY GAME_DIRECTORY "/lotr"
-#      else
-#        define DATA_DIRECTORY GAME_DIRECTORY
-#      endif
-#    else
-#      define DATA_DIRECTORY GAME_DIRECTORY "/cd"
-#    endif
-#  else
-#    define DATA_DIRECTORY GAME_DIRECTORY "/towers"
-#  endif
+#  define PREFIX ""
 #endif
 
 /* should we produce pixel-precise interface ass original

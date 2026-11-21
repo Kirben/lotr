@@ -35,11 +35,7 @@
 
 #define MAX_COMMAND_SPOTS 256
 #define MAX_PYTHON_SPOTS 1024
-#ifndef TTT
-#define SPOT_MAX_COMMANDS 128
-#else
 #define SPOT_MAX_COMMANDS 512
-#endif
 
 
 /* game command spot */

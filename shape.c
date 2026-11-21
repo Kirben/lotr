@@ -47,26 +47,16 @@ Palette *shapes_palette;
 
 
 /* portraits */
-#ifndef TTT
-#define PORTRAITS_NUM 46
-#else
-#define PORTRAITS_NUM 67
-#endif
-Portrait *portraits_cache[PORTRAITS_NUM];
+#define FELLOWSHIP_PORTRAITS 46
+#define TWO_TOWERS_PORTRAITS 67
+static Portrait *portraits_cache[TWO_TOWERS_PORTRAITS];
 
-/* shapes */
-#ifndef TTT
 #include "shapes_param.h"
-#else
 #include "shapes_param_ttt.h"
-#endif
 
-/* item icons */
-#ifdef TTT
 #define ICONS_NUM 160
 #include "icons_ttt.h"
-Pixmap *icons[ICONS_NUM];
-#endif
+static Pixmap *icons[ICONS_NUM];
 
 /*
   init shapes
@@ -82,6 +72,9 @@ shapes_init(void)
     Pixmap *pixmap;
     int i, j;
     int w, h;
+    int two_towers = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS;
+    int portrait_count = two_towers ? TWO_TOWERS_PORTRAITS : FELLOWSHIP_PORTRAITS;
+    const int (*shapes_param)[2] = two_towers ? two_towers_shapes : fellowship_shapes;
 
 
     pal = lotr_fopen("shapes.pal", "rb");
@@ -149,13 +142,13 @@ shapes_init(void)
 
     archive = archive_ndx_open("portrait");
 
-    if (archive->size != PORTRAITS_NUM) {
+    if (archive->size != portrait_count) {
         fprintf(stderr, "lotr: expecting %d portraits (%d found)\n",
-                PORTRAITS_NUM, archive->size);
+                portrait_count, archive->size);
         exit(1);
     }
 
-    for (i = 0; i < PORTRAITS_NUM; ++i) {
+    for (i = 0; i < portrait_count; ++i) {
         portraits_cache[i] = NULL;
         if (archive_data_size(archive, i) == 0)
             continue;
@@ -198,29 +191,29 @@ shapes_init(void)
 
     archive_close(archive);
 
-#ifdef TTT
-    archive = archive_ndx_open("icon");
+    if (two_towers) {
+        archive = archive_ndx_open("icon");
 
-    if (archive->size != ICONS_NUM) {
-        fprintf(stderr, "lotr: expecting %d icons (%d found)\n", ICONS_NUM,
-                archive->size);
-        exit(1);
+        if (archive->size != ICONS_NUM) {
+            fprintf(stderr, "lotr: expecting %d icons (%d found)\n", ICONS_NUM,
+                    archive->size);
+            exit(1);
+        }
+
+        for (i = 0; i < archive->size; ++i) {
+            data = decompress_ndxarchive(archive, i, &size);
+
+            w = icon_width[i];
+            h = size / w;
+
+            icons[i] = pixmap_new(w, h);
+            memcpy(icons[i]->data, data, w * h);
+            pixmap_set_alpha(icons[i], 0x9e);
+            free(data);
+        }
+
+        archive_close(archive);
     }
-
-    for (i = 0; i < archive->size; ++i) {
-        data = decompress_ndxarchive(archive, i, &size);
-
-        w = icon_width[i];
-        h = size / w;
-
-        icons[i] = pixmap_new(w, h);
-        memcpy(icons[i]->data, data, w * h);
-        pixmap_set_alpha(icons[i], 0x9e);
-        free(data);
-    }
-
-    archive_close(archive);
-#endif
 
 }
 
@@ -251,8 +244,7 @@ shapes_close(void)
 
 
     /* free portraits cache */
-
-    for (i = 0; i < PORTRAITS_NUM; ++i) {
+    for (i = 0; i < TWO_TOWERS_PORTRAITS; ++i) {
         if (portraits_cache[i] == NULL)
             continue;
         if (portraits_cache[i]->freepalette)
@@ -263,12 +255,13 @@ shapes_close(void)
     }
 
 
-#ifdef TTT
     /* free icons */
     for (i = 0; i < ICONS_NUM; ++i) {
-        pixmap_free(icons[i]);
+        if (icons[i]) {
+            pixmap_free(icons[i]);
+            icons[i] = NULL;
+        }
     }
-#endif
 
 }
 
@@ -345,7 +338,7 @@ void
 portrait_draw(int index, int x, int y)
 {
 
-    if (index < 0 || index >= PORTRAITS_NUM || portraits_cache[index] == NULL) {
+    if (index < 0 || index >= TWO_TOWERS_PORTRAITS || portraits_cache[index] == NULL) {
         fprintf(stderr, "lotr: invalid portrait num %d\n", index);
         return;
     }
@@ -358,7 +351,6 @@ portrait_draw(int index, int x, int y)
 }
 
 
-#ifdef TTT
 /*
   draw icon
 */
@@ -367,15 +359,13 @@ void
 icon_draw(int index, int x, int y)
 {
 
-    if (index < 0 || index >= ICONS_NUM) {
+    if (index < 0 || index >= ICONS_NUM || !icons[index]) {
         fprintf(stderr, "lotr: invalid icon num %d\n", index);
         return;
     }
 
     pixmap_draw(icons[index], x, y);
-
 }
-#endif
 
 
 /*
@@ -415,10 +405,8 @@ shape_get_weapon_shape_id(int character_shape_id, int weapon_class)
         weapon_bank = 456;      /* troll */
     if (character_shape_id == 23)
         weapon_bank = 396;      /* Gollum */
-#ifdef TTT                      /* there is one shape missing in vol 1 */
-    if (character_shape_id == 31)
+    if (character_shape_id == 31 && lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS)
         weapon_bank = 576;      /* ent */
-#endif
     if (character_shape_id == 34)
         weapon_bank = 516;      /* ghost */
 

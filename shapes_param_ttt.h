@@ -1,4 +1,4 @@
-int shapes_param[SHAPES_NUM][2] = {
+static const int two_towers_shapes[SHAPES_NUM][2] = {
     {24, 4},                    /* index=0   hobbit */
     {24, 4},                    /* index=1 */
     {24, 4},                    /* index=2 */
