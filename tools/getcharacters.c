@@ -37,7 +37,7 @@ main(void)
     y = start[2] + start[3] * 0x100;
 
 
-    printf("int characters_pos[][6] =   { ");
+    printf("static const int fellowship_positions[][10] =   { ");
 
     n = 0;
 
