@@ -151,10 +151,8 @@ char game_par_text[256];
 /* actual spot */
 CommandSpot *game_actual_spot;
 
-#ifdef DEMO
-int demo_state = 0;
-void demo_frame(void);
-#endif
+static int demo_state;
+static void demo_frame(void);
 
 
 
@@ -334,6 +332,7 @@ game_new(void)
     game_map_id = -1;
 
     LotrDataFormat format = lotr_current_edition()->data_format;
+    demo_state = 0;
     game_load_map(format == LOTR_DATA_TWO_TOWERS ? 6 : 0);
     map_set_frame(format == LOTR_DATA_DEMO ? 0x400 : 0x200);
 
@@ -762,10 +761,9 @@ game_leader_movement(void)
     if (leader->action != CHARACTER_STAY)
         return;
 
-#ifdef DEMO
-    if (demo_state < 0x100)
+    int is_demo = lotr_current_edition()->data_format == LOTR_DATA_DEMO;
+    if (is_demo && demo_state < 0x100)
         return;
-#endif
 
 #ifdef ENABLE_CHEATS
     if (game_moving && (lotr_key_shift() || lotr_key_ctrl()))
@@ -801,11 +799,7 @@ game_leader_movement(void)
         if (!map_is_in_spot(leader, game_actual_spot, &w, &h))
             game_actual_spot = NULL;
 
-#ifndef DEMO
-        spot = map_get_spot(leader);
-#else
-        spot = NULL;
-#endif
+        spot = is_demo ? NULL : map_get_spot(leader);
 
         if (game_actual_spot != spot) {
             game_timer = -1;
@@ -985,14 +979,12 @@ game_next_frame(void)
     if (game_actual_spot == NULL)
         game_spot_running = 0;
 
-#ifdef DEMO
-    if (demo_state < 0x100) {
+    if (lotr_current_edition()->data_format == LOTR_DATA_DEMO && demo_state < 0x100) {
         demo_frame();
         if (!gui_mode())
             game_draw_map();
         goto end_next_frame;
     }
-#endif
 
     if (!game_spot_running) {
 
@@ -1730,8 +1722,7 @@ game_set_follow(int follow)
 
 
 
-#ifdef DEMO
-void
+static void
 demo_frame(void)
 {
 
@@ -1937,4 +1928,3 @@ demo_frame(void)
     }
 
 }
-#endif

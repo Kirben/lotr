@@ -91,7 +91,7 @@ lotr_current_edition(void)
 const LotrEdition *
 lotr_edition_at(LotrDataFormat format)
 {
-    return (unsigned int)format <= LOTR_DATA_DEMO ? &editions[format] : NULL;
+    return (unsigned int)format < LOTR_DATA_COUNT ? &editions[format] : NULL;
 }
 
 int
@@ -103,7 +103,7 @@ lotr_configure_edition(const char *edition, const char *data_dir,
 #ifdef DEMO
         int first = LOTR_DATA_DEMO, last = LOTR_DATA_DEMO;
 #else
-        int first = LOTR_DATA_STANDARD, last = LOTR_DATA_TWO_TOWERS;
+        int first = LOTR_DATA_STANDARD, last = LOTR_DATA_DEMO;
 #endif
         profile = NULL;
         for (int i = first; i <= last; ++i)

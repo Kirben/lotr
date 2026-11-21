@@ -44,7 +44,7 @@ selector_read_settings(const char *path, EditionPaths paths[], int *selected)
     xmlNodePtr root = xmlDocGetRootElement(doc);
     if (root && xmlStrEqual(root->name, BAD_CAST "wonderland")) {
         xmlChar *last = xmlGetProp(root, BAD_CAST "selected");
-        for (int i = LOTR_DATA_STANDARD; i <= LOTR_DATA_TWO_TOWERS; ++i) {
+        for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
             const char *key = lotr_edition_at(i)->key;
             if (last && xmlStrEqual(last, BAD_CAST key))
                 *selected = i;
@@ -113,7 +113,7 @@ selector_write_settings(const char *path, EditionPaths paths[], int selected)
     if (root) {
         xmlDocSetRootElement(doc, root);
         xmlNewProp(root, BAD_CAST "selected", BAD_CAST lotr_edition_at(selected)->key);
-        for (int i = LOTR_DATA_STANDARD; i <= LOTR_DATA_TWO_TOWERS; ++i) {
+        for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
             xmlNodePtr entry = xmlNewChild(root, NULL, BAD_CAST lotr_edition_at(i)->key, NULL);
             if (!entry)
                 continue;

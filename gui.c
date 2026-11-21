@@ -86,7 +86,7 @@ static int dialog_died_show_cartoon = FALSE;
 /* various GUI components */
 #define TEST 15
 #define GUI_CHAIN_HORIZ   0
-#define GUI_MOUSE         1
+#define GUI_UNUSED_MOUSE  1
 #define GUI_MENU          2
 #define GUI_SCROLL_TOP    3
 #define GUI_CHAIN_VERT    4
@@ -105,7 +105,7 @@ static int dialog_died_show_cartoon = FALSE;
 
 Pixmap *gui_components[GUI_COMP_NUM];
 int gui_comp_widths[GUI_COMP_NUM] = { /*00 */ 5,
-    /*01 */ 160,
+    /*01 */ 0,
     /*02 */ 320,
     /*03 */ 8,
     /*04 */ 6,
@@ -177,6 +177,9 @@ gui_init(void)
     archive = archive_ndx_open("arts");
 
     for (i = 0; i < GUI_COMP_NUM; ++i) {
+        /* The engine never draws the original mouse sprite. */
+        if (i == GUI_UNUSED_MOUSE)
+            continue;
         gui_components[i] = pixmap_read_from_ndx_archive(archive, i);
         pixmap_set_width(gui_components[i], gui_comp_widths[i]);
     }
@@ -2085,18 +2088,13 @@ dialog_talk_show(int character_id, int text_id)
 
         character = character_get(character_id);
 
-#ifdef DEMO
-        /* there are not texts in the Demo */
-        text =
-            "Hullo Mr. Frodo. This demo is no fun. Please buy a full game and kick some Nazgul ass.";
-#else
-        if (character->texts[0] == 0 && character->texts[1] <= 0) {
+        if (lotr_current_edition()->data_format == LOTR_DATA_DEMO) {
+            text = "Hullo Mr. Frodo. This demo is no fun. Please buy a full game and kick some Nazgul ass.";
+        } else if (character->texts[0] == 0 && character->texts[1] <= 0) {
             /* character has nothing to say */
             dialog_talk_who_show();
             return;
-        }
-
-        if (text_id >= 0x100) {
+        } else if (text_id >= 0x100) {
             text = "I don't know any more than you do about that.";
         } else {
             if (text_id < 0)
@@ -2108,7 +2106,6 @@ dialog_talk_show(int character_id, int text_id)
 #endif
                 text = game_get_text(text_id);
         }
-#endif
     } /* character_id != -1 */
     else {
 #ifdef WIZARD_MODE
@@ -3011,9 +3008,8 @@ gui_frame(void)
     if (dialog_mode == DIALOG_NONE) {
 
         if (lotr_key_esc()) {
-#ifdef DEMO
-            exit(0);
-#endif
+            if (lotr_current_edition()->data_format == LOTR_DATA_DEMO)
+                exit(0);
             lotr_reset_keyboard();
             dialog_options_show();
         }
@@ -3046,9 +3042,8 @@ gui_frame(void)
 #endif
 
             case 'o':
-#ifndef DEMO
-                dialog_options_show();
-#endif
+                if (lotr_current_edition()->data_format != LOTR_DATA_DEMO)
+                    dialog_options_show();
                 break;
 
             case 'q':
@@ -3094,9 +3089,8 @@ gui_frame(void)
         if (lotr_key_esc()) {
             if (dialog_mode == DIALOG_DIED)
                 exit(0);
-#ifdef DEMO
-            exit(0);
-#endif
+            if (lotr_current_edition()->data_format == LOTR_DATA_DEMO)
+                exit(0);
             lotr_reset_keyboard();
             quit_menu();
         }

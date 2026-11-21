@@ -302,26 +302,22 @@ shape_get(int i)
   draw shape
 */
 
+Pixmap *
+shape_frame(const Shape *shape, int state)
+{
+    if (!shape)
+        return NULL;
+    if (state >= 0 && state < shape->pixmaps_num && shape->pixmaps[state])
+        return shape->pixmaps[state];
+    return shape->pixmaps[0];
+}
+
 void
 shape_draw(Shape *shape, int state, int x, int y)
 {
-
-    Pixmap *pixmap;
-
-    if (shape == NULL)
-        return;
-
-    if (shape->pixmaps[0] == NULL)
-        return;
-
-    if (shape->pixmaps[state] == NULL)
-        pixmap = shape->pixmaps[0];
-    else
-        pixmap = shape->pixmaps[state];
-
-
-    pixmap_draw(pixmap, x - pixmap->width, y - pixmap->height);
-
+    Pixmap *pixmap = shape_frame(shape, state);
+    if (pixmap)
+        pixmap_draw(pixmap, x - pixmap->width, y - pixmap->height);
 }
 
 

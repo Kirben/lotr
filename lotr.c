@@ -34,8 +34,8 @@
 #include "cartoon.h"
 #include "init.h"
 #include "game.h"
-#include "gui.h"
 #include "sound.h"
+#include "gui.h"
 #include "lotr_sdl.h"
 #include "timing.h"
 #include "utils.h"
@@ -53,7 +53,7 @@ print_usage(FILE *stream, const char *program)
 #ifdef DEMO
     fputs("Edition: demo\n", stream);
 #else
-    fputs("Editions: standard, enhanced-cd, two-towers\n", stream);
+    fputs("Editions: standard, enhanced-cd, two-towers, demo\n", stream);
     fputs("--movie-dir is available for Enhanced CD.\n", stream);
 #endif
 #if defined(LOTR_SDL2_SELECTOR) && !defined(DEMO)
@@ -141,11 +141,10 @@ play_game:
 
 
     game_init_graphics();
-
-    lotr_reset_timer();
     if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
         play_music();
 
+    lotr_reset_timer();
     while (!lotr_key_esc() && !game_title_requested()) {
         int frame_time = FRAME_TIME;
         lotr_poll_events();

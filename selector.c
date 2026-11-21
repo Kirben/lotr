@@ -38,7 +38,7 @@ typedef struct {
 } Selector;
 
 /* The engine keeps these paths after the selector window closes. */
-static EditionPaths edition_paths[3];
+static EditionPaths edition_paths[LOTR_DATA_COUNT];
 
 static int
 enhanced_cd(const Selector *selector)
@@ -109,7 +109,7 @@ button(SDL_Renderer *renderer, SDL_Rect rect, const char *label,
 static SDL_Rect
 card_rect(int index)
 {
-    SDL_Rect rect = {24 + index * 302, 234, 292, 98};
+    SDL_Rect rect = {24 + index * 226, 234, 218, 98};
     return rect;
 }
 
@@ -138,11 +138,7 @@ draw_browser(Selector *selector)
 static void
 draw_selector(Selector *selector)
 {
-    static const char *const volumes[] = {"VOLUME I", "VOLUME I", "VOLUME II"};
-    static const char *const games[] = {
-        "The Fellowship", "The Fellowship", "The Two Towers"
-    };
-    static const char *const releases[] = {"Standard DOS", "Enhanced CD", "Standard DOS"};
+    static const char *const releases[] = {"Standard DOS", "Enhanced CD", "Standard DOS", "Demo"};
     SDL_Renderer *renderer = selector->renderer;
     EditionPaths *paths = &edition_paths[selector->selected];
     draw_color(renderer, background);
@@ -152,13 +148,15 @@ draw_selector(Selector *selector)
     text_at(renderer, "Wonderland game engine", 59, 123, 2, gold);
 
     text_at(renderer, "Choose an edition", 24, 213, 2, bright);
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
         SDL_Rect rect = card_rect(i);
         int active = i == selector->selected;
         box(renderer, rect, active ? 0x303239 : panel,
             active ? (selector->focus == EDITION ? bright : gold) : border);
-        text_at(renderer, volumes[i], rect.x + 14, rect.y + 13, 1, active ? gold : muted);
-        text_at(renderer, games[i], rect.x + 14, rect.y + 29, 2, bright);
+        text_at(renderer, i == LOTR_DATA_TWO_TOWERS ? "VOLUME II" : "VOLUME I",
+                rect.x + 14, rect.y + 13, 1, active ? gold : muted);
+        text_at(renderer, i == LOTR_DATA_TWO_TOWERS ? "The Two Towers" : "The Fellowship",
+                rect.x + 14, rect.y + 29, 2, bright);
         if (i != LOTR_DATA_TWO_TOWERS)
             text_at(renderer, "of the Ring", rect.x + 14, rect.y + 47, 2, bright);
         text_at(renderer, releases[i], rect.x + 14, rect.y + 73, 2, active ? gold : muted);
@@ -199,6 +197,12 @@ validate_archive(Selector *selector, const char *data, const char *index, int le
 static void
 validate_paths(Selector *selector)
 {
+    static const char *const demo_pairs[][2] = {
+        {"arts.dat", "arts.ndx"}, {"demo.dat", "demo.ndx"}, {"shapes.dat", "shapes.ndx"},
+        {"portrait.dat", "portrait.ndx"}, {"npcs.dat", "npcs.ndx"}, {"snd.dat", "snd.ndx"},
+        {"democrt0.dat", "democrt0.idx"}, {"democrt1.dat", "democrt1.idx"},
+        {"democrt2.dat", "democrt2.idx"}
+    };
     static const char *const common_pairs[][2] = {
         {"arts.dat", "arts.ndx"}, {"map0.dat", "map0.ndx"},
         {"map1.dat", "map1.ndx"}, {"shapes.dat", "shapes.ndx"},
@@ -230,6 +234,21 @@ validate_paths(Selector *selector)
     const char *movies = enhanced_cd(selector) && paths->movies[0] ? paths->movies : NULL;
     if (!lotr_configure_edition(lotr_edition_at(selector->selected)->key, paths->data, movies))
         return;
+    if (selector->selected == LOTR_DATA_DEMO) {
+        for (size_t i = 0; i < SDL_arraysize(demo_pairs); ++i)
+            if (!validate_archive(selector, demo_pairs[i][0], demo_pairs[i][1],
+                                  strstr(demo_pairs[i][1], ".idx") != NULL))
+                return;
+        if (lotr_asset_size("arts.pal", 0) <= 0 || lotr_asset_size("shapes.pal", 0) <= 0 ||
+            lotr_asset_size("arts.ndx", 0) != 64 || lotr_asset_size("demo.ndx", 0) != 32 ||
+            lotr_asset_size("snd.ndx", 0) != 108 || lotr_asset_size("npcs.ndx", 0) != 960 ||
+            lotr_asset_size("portrait.ndx", 0) != 184 || lotr_asset_size("shapes.ndx", 0) != 2800) {
+            SDL_strlcpy(selector->status, "The archives or palettes do not match the Fellowship demo.",
+                        sizeof(selector->status));
+            return;
+        }
+        goto ready;
+    }
     for (size_t i = 0; i < SDL_arraysize(common); ++i) {
         if (lotr_asset_size(common[i], 0) <= 0) {
             snprintf(selector->status, sizeof(selector->status), "Game data folder needs %s.", common[i]);
@@ -280,6 +299,7 @@ validate_paths(Selector *selector)
             }
         }
     }
+ready:
     selector->ready = 1;
     SDL_strlcpy(selector->status, "Game data found. Ready to play.", sizeof(selector->status));
 }
@@ -432,7 +452,7 @@ selector_event(Selector *selector, const SDL_Event *event)
         edit_path(selector, path, event->text.text);
     if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT) {
         int x = event->button.x, y = event->button.y;
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < LOTR_DATA_COUNT; ++i)
             if (contains(card_rect(i), x, y))
                 select_card(selector, i);
         if (contains(data_rect, x, y))
@@ -479,7 +499,8 @@ selector_event(Selector *selector, const SDL_Event *event)
         }
     } else if (selector->focus == EDITION && (key == SDLK_LEFT || key == SDLK_RIGHT ||
                                              key == SDLK_UP || key == SDLK_DOWN)) {
-        select_card(selector, (selector->selected + (key == SDLK_LEFT || key == SDLK_UP ? 2 : 1)) % 3);
+        int step = key == SDLK_LEFT || key == SDLK_UP ? -1 : 1;
+        select_card(selector, (selector->selected + step + LOTR_DATA_COUNT) % LOTR_DATA_COUNT);
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
         if (selector->focus == BROWSE_DATA || selector->focus == BROWSE_MOVIES)
             open_browser(selector, selector->focus == BROWSE_MOVIES);
@@ -508,7 +529,7 @@ lotr_select_edition(void)
     SDL_SetWindowMinimumSize(window, WIDTH / 2, HEIGHT / 2);
     SDL_RenderSetLogicalSize(renderer, WIDTH, HEIGHT);
     Selector selector = {.renderer = renderer, .art = art, .selected = LOTR_DATA_STANDARD};
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < LOTR_DATA_COUNT; ++i)
         SDL_strlcpy(edition_paths[i].data, lotr_edition_at(i)->default_data_dir,
                     sizeof(edition_paths[i].data));
     char *preferences = SDL_GetPrefPath("Wonderland", "LotR");

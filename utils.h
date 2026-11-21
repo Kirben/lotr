@@ -50,7 +50,8 @@ typedef enum {
     LOTR_DATA_STANDARD,
     LOTR_DATA_ENHANCED_CD,
     LOTR_DATA_TWO_TOWERS,
-    LOTR_DATA_DEMO
+    LOTR_DATA_DEMO,
+    LOTR_DATA_COUNT
 } LotrDataFormat;
 
 typedef struct {

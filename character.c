@@ -722,22 +722,14 @@ character_draw(int id, int x, int y, int dir)
         }
 
         shape_draw(horse1, frame, x + xoffset, y + yoffset);
-        if (dir == CHARACTER_UP)
-            shape_draw(horse2, frame, x + xoffset,
-                       y + yoffset + horse2->pixmaps[frame]->height);
-        if (dir == CHARACTER_DOWN)
-            shape_draw(horse2, frame, x + xoffset,
-                       y + yoffset + horse2->pixmaps[frame]->height);
-        if (dir == CHARACTER_LEFT)
-            shape_draw(horse2, frame,
-                       x + xoffset + horse2->pixmaps[frame]->width,
-                       y + yoffset);
-        if (dir == CHARACTER_RIGHT)
-            shape_draw(horse2, frame,
-                       x + xoffset + horse2->pixmaps[frame]->width,
-                       y + yoffset);
-
-
+        Pixmap *rear = shape_frame(horse2, frame);
+        if (rear) {
+            if (dir == CHARACTER_UP || dir == CHARACTER_DOWN)
+                yoffset += rear->height;
+            else
+                xoffset += rear->width;
+            shape_draw(horse2, frame, x + xoffset, y + yoffset);
+        }
     }
 
 
@@ -788,21 +780,22 @@ character_draw(int id, int x, int y, int dir)
     int xx = x + character->x_offset;
     int yy = y + character->y_offset;
     shape_draw(character->shapes[draw_action], frame, xx, yy);
-    if (character->composite_shape) {
+    Pixmap *front = shape_frame(character->shapes[draw_action], frame);
+    if (character->composite_shape && front) {
         if (lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS) {
             if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
-                int off = character->shapes[draw_action]->pixmaps[frame]->height;
+                int off = front->height;
                 shape_draw(character->shapes[draw_action + 6], frame, xx, yy - off);
             } else {
-                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                int off = front->width;
                 shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
             }
         } else {
             if (dir == CHARACTER_UP || dir == CHARACTER_DOWN) {
-                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                int off = front->width;
                 shape_draw(character->shapes[draw_action + 6], frame, xx + off, yy);
             } else {
-                int off = character->shapes[draw_action]->pixmaps[frame]->width;
+                int off = front->width;
                 shape_draw(character->shapes[draw_action + 6], frame, xx, yy + off);
             }
         }
