@@ -52,8 +52,11 @@ lotr_init(void)
 #endif
     initlevel = 0;
 
-    /* Clean up on exit */
-    atexit(lotr_close);
+    static int cleanup_registered;
+    if (!cleanup_registered) {
+        atexit(lotr_close);
+        cleanup_registered = 1;
+    }
 
     lotr_system_init();
     initlevel++;

@@ -39,6 +39,7 @@
 #include "spot.h"
 #include "shape.h"
 #include "sound.h"
+#include "timing.h"
 #include "utils.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -82,8 +83,12 @@
 #define COMMAND_IF_PARTY        0x05
 #define IF_PARTY_CONDITION_HAS_SKILL   0x01
 #define IF_PARTY_CONDITION_HAS_ITEM    0x02
+#define IF_PARTY_CONDITION_ITEM_CATEGORY 0x03
+#define IF_PARTY_CONDITION_HAS_SPELL   0x04
+#define IF_PARTY_CONDITION_HAS_SPELL_ALT 0x05
 #define IF_PARTY_CONDITION_IN_PARTY    0x0a
 #define IF_PARTY_CONDITION_SIZE        0x0b
+#define IF_PARTY_CONDITION_MIN_SIZE    0x0c
 #define IF_PARTY_CONDITION_HAVE_SILVER 0x0d
 
 #define COMMAND_IF_DIRECTION    0x09
@@ -140,7 +145,7 @@
 #define COMMAND_47              0x47
 
 #define COMMAND_UNKNOWN1        0x32
-#define COMMAND_UNKNOWN6        0x19    /* proceed frames */
+#define COMMAND_UNKNOWN6        0x19
 #define COMMAND_UNKNOWN7        0x4e
 #define COMMAND_UNKNOWN9        0x44
 #define COMMAND_UNKNOWNc        0x49
@@ -157,17 +162,46 @@ enum {
     COMMAND_ACTIVATE_PARTY = 0x100,
     COMMAND_43,
     COMMAND_IF_PARTY_ACTIVE,
-    COMMAND_END_OF_GAME
+    COMMAND_END_OF_GAME,
+    COMMAND_SELECT_CHARACTER,
+    COMMAND_SET_SELECTED_FIELD,
+    COMMAND_PARAGRAPH_SEQUENCE,
+    COMMAND_GET_WHEN_EMPTY,
+    COMMAND_NO_OPERATION,
+    COMMAND_GAME_REG_OFF,
+    COMMAND_WAIT_TICKS,
+    COMMAND_CONFINE_COMBAT
 };
 
 static int
-spot_command(int opcode, int two_towers)
+spot_command(int opcode, LotrDataFormat format)
 {
+    int two_towers = format == LOTR_DATA_TWO_TOWERS;
     switch (opcode) {
+        case COMMAND_UNKNOWN6:
+            return format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD ?
+                COMMAND_WAIT_TICKS : opcode;
+        case 0x2b:
+            return format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD ?
+                COMMAND_NO_OPERATION : opcode;
+        case COMMAND_UNKNOWN1:
+            return format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD ?
+                COMMAND_CONFINE_COMBAT : opcode;
+        case COMMAND_UNKNOWNd:
+            return format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD ?
+                COMMAND_GAME_REG_OFF : opcode;
+        case 0x3f:
+            return !two_towers ? COMMAND_SELECT_CHARACTER : opcode;
+        case 0x40:
+            return !two_towers ? COMMAND_SET_SELECTED_FIELD : opcode;
         case 0x42:
-            return two_towers ? COMMAND_ACTIVATE_PARTY : opcode;
+            return two_towers ? COMMAND_ACTIVATE_PARTY :
+                format == LOTR_DATA_ENHANCED_CD ? COMMAND_GET_WHEN_EMPTY : opcode;
         case 0x43:
-            return two_towers ? COMMAND_43 : COMMAND_END_OF_GAME;
+            return two_towers ? COMMAND_43 :
+                format == LOTR_DATA_ENHANCED_CD ? COMMAND_END_OF_GAME : opcode;
+        case 0x44:
+            return format == LOTR_DATA_ENHANCED_CD ? COMMAND_PARAGRAPH_SEQUENCE : opcode;
         case 0x48:
             return two_towers ? COMMAND_IF_PARTY_ACTIVE : opcode;
         case 0x4c:
@@ -235,9 +269,45 @@ spot_decode_direction(int direction)
 */
 
 INLINE int
-readint(Uint8 *data)
+readint(const Uint8 *data)
 {
     return data[0] + 0x100 * data[1];
+}
+
+
+/* Both Volume I archives omit the target actor from these two Move rows. */
+static int
+spot_action_short_move(const CommandSpot *spot, int command, int row)
+{
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    return (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD) &&
+        spot->map == 5 && (spot->id == 104 || spot->id == 105) &&
+        command == 0x1e && row == 1 && spot->data_size - command >= 11 &&
+        spot->data[command + 1] == 2 && spot->data[command + 7] == SPOT_ACTION_MOVE;
+}
+
+static int
+spot_action_address(const CommandSpot *spot, int command, int row)
+{
+    return readint(spot->data + command + 5 + row * 5 -
+                   spot_action_short_move(spot, command, row));
+}
+
+
+/* The Detect Traps branch in both Volume I archives omits its outer ENDIF.
+ * Its guarded text rejoins at the existing return GOTO. */
+static int
+spot_chest_detect_return(const CommandSpot *spot, int command)
+{
+    static const Uint8 guard[] = {0x0a, 0x30, 0x13, 0x3b, 0x13,
+                                  0x1a, 0x48, 0x0e, 0x0f, 0x15};
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    if ((format != LOTR_DATA_STANDARD && format != LOTR_DATA_ENHANCED_CD) ||
+        spot->map != 9 || spot->id != 79 || command != 0x2a ||
+        spot->data_size < command + 10 ||
+        memcmp(spot->data + command - 2, guard, sizeof(guard)) != 0)
+        return -1;
+    return spot->label_start + command + 7;
 }
 
 
@@ -304,8 +374,14 @@ new_parsing:
     last_commands_num = spot->commands_num;
     unknown = 0;
     while (i < spot->data_size && n < max_commands) {
+        if ((format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD) &&
+            spot->map == 5 && spot->id >= 5 && spot->id <= 7 &&
+            spot->data_size - i == 3 && i > spot->headersize &&
+            spot->data[i - 1] == COMMAND_END && spot->data[i] == COMMAND_REGISTER_ON &&
+            spot->data[i + 1] == 0x0d && spot->data[i + 2] == COMMAND_END)
+            level = next_level = 0;
         spot->command_start[n] = i;
-        switch (spot_command(spot->data[i], two_towers)) {
+        switch (spot_command(spot->data[i], format)) {
 
             case COMMAND_UNKNOWNl:
                 i = spot->data_size;
@@ -319,8 +395,26 @@ new_parsing:
                 i += 8;
                 break;
 
+            case COMMAND_PARAGRAPH_SEQUENCE:
+                if (spot->data_size - i < 2 ||
+                    spot->data[i + 1] > spot->data_size - i - 2) {
+                    spot->not_parsed = 1;
+                    i = spot->data_size;
+                    continue;
+                }
+                i += 2 + spot->data[i + 1];
+                break;
+
             case COMMAND_UNKNOWN9:
                 i += 6;
+                break;
+
+            case COMMAND_SELECT_CHARACTER:
+                i += 2;
+                break;
+
+            case COMMAND_SET_SELECTED_FIELD:
+                i += 3;
                 break;
 
             case COMMAND_UNKNOWNm:
@@ -328,6 +422,7 @@ new_parsing:
                 break;
 
             case COMMAND_UNKNOWN6:
+            case COMMAND_WAIT_TICKS:
                 i += 3;
                 break;
 
@@ -337,6 +432,7 @@ new_parsing:
                 i += 2;
                 break;
 
+            case COMMAND_CONFINE_COMBAT:
             case COMMAND_UNKNOWN1:
             case COMMAND_UNKNOWN7:
             case COMMAND_UNKNOWNe:
@@ -399,6 +495,7 @@ new_parsing:
             case COMMAND_ACTIVATE_PARTY:
                 i += 3;
                 break;
+            case COMMAND_GET_WHEN_EMPTY:
             case COMMAND_UNKNOWN42:
                 i += 1;
                 break;
@@ -421,6 +518,7 @@ new_parsing:
             case COMMAND_REGISTER_OFF:
             case COMMAND_REGISTER_ON:
             case COMMAND_IF_GAME_REG:
+            case COMMAND_GAME_REG_OFF:
             case COMMAND_GAME_REG_ON:
             case COMMAND_NPC_TURN_TO_ME:
             case COMMAND_NPC_DELETE:
@@ -459,17 +557,29 @@ new_parsing:
             case COMMAND_EXIT_BUILDING:
             case COMMAND_47:
             case COMMAND_END_OF_GAME:
+            case COMMAND_NO_OPERATION:
                 i += 1;
                 break;
 
 
             case COMMAND_TRUE_THEN:
             case COMMAND_FALSE_THEN:
-                next_level = level + 1;
+                next_level = level + (spot_chest_detect_return(spot, i) < 0);
                 i += 1;
                 break;
 
             case COMMAND_ELSE:
+                /* The Two Towers demo has a terminal empty ELSE/ENDIF.
+                   The DOS handler skips the ENDIF and reaches END. */
+                if (two_towers && level == 0 && n + 2 < max_commands &&
+                    spot->data_size - i == 3 &&
+                    spot->data[i + 1] == COMMAND_ENDIF &&
+                    spot->data[i + 2] == COMMAND_END) {
+                    spot->command_level[n++] = 0;
+                    spot->command_start[n] = i + 1;
+                    i += 2;
+                    break;
+                }
                 next_level = level;
                 level--;
                 i += 1;
@@ -514,23 +624,43 @@ new_parsing:
 
             case COMMAND_ACTION:
                 j = i;
-                i += 2 + 5 * spot->data[i + 1];
+                if (spot->data_size - i < 2)
+                    goto truncated_action;
+                if (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD) {
+                    /* The last Old Forest table declares two nonexistent rows. */
+                    if (spot->map == 3 && spot->id == 7 &&
+                        i == (format == LOTR_DATA_STANDARD ? 0x7f : 0x80) &&
+                        spot->data[i + 1] == 5)
+                        spot->data[i + 1] = 3;
+                    int count = spot->data[i + 1];
+                    i += 2 + 5 * count - spot_action_short_move(spot, j, 1);
+                    if (i > spot->data_size)
+                        goto truncated_action;
+                    /* Reverse Buckland Gate declares two actions. The unused
+                     * Picklock row still occupies five bytes in both archives. */
+                    if (spot->map == 2 && spot->id == 28 && count == 2 &&
+                        i == 0x2c && spot->data_size - i >= 5 &&
+                        spot->data[i] == SPOT_ACTION_SKILL &&
+                        spot->data[i + 1] == 0x4d && spot->data[i + 2] == 0xff)
+                        i += 5;
+                    break;
+                }
 
+                i += 2 + 5 * spot->data[i + 1];
                 while (j + 5 < i &&
                        (i > spot->data_size ||
                         readint(spot->data + i - 2) < spot->label_start ||
-                        readint(spot->data + i - 2) >=
-                        spot->label_start + spot->data_size)) {
+                        readint(spot->data + i - 2) >= spot->label_start + spot->data_size))
                     i -= 5;
-                }
-
-                if (i != j + 2 + 5 * spot->data[j + 1]) {
-                    fprintf(stderr,
-                            "lotr: WARNING: action command size changed from %d to %d\n",
-                            spot->data[j + 1], (i - j - 2) / 5);
-                    spot->data[j + 1] = (i - j - 2) / 5;
-                }
+                spot->data[j + 1] = (i - j - 2) / 5;
                 break;
+
+truncated_action:
+                /* Leave the truncated command out of the executable list. */
+                spot->commands_num = n;
+                spot->not_parsed = 1;
+                fprintf(stderr, "lotr: truncated action table in spot %02x\n", spot->id);
+                return;
 
             default:
 unknown_command:
@@ -577,7 +707,7 @@ unknown_command:
             int num_actions = spot->data[k + 1];
             int l;
             for (l = 0; l < num_actions; ++l) {
-                int addr = readint(spot->data + k + 1 + l * 5 + 4);
+                int addr = spot_action_address(spot, k, l);
                 if (spot_check_addr_in_spot(spot, addr) == -1) {
                     i = addr - spot->label_start;
                     if (spot->commands_num > last_commands_num)
@@ -670,6 +800,9 @@ spot_parse(Uint8 *data, int size, CommandSpot *spots[], int *spots_num)
 
         spot = lotr_malloc(sizeof(CommandSpot));
         spot->headersize = header_size;
+        spot->selected_character_id = -1;
+        spot->paragraph_index = 0;
+        spot->get_requires_empty = 0;
         spot->pythonspot = 0;
 
         spot->map = data[i + 4];
@@ -764,6 +897,47 @@ spot_character_name(int id)
 */
 
 
+
+enum {
+    SPOT_SELECTION_SIZE = 16,
+    SPOT_MATCHING = 0,
+    SPOT_NONMATCHING = 1
+};
+
+static int spot_selection[2][SPOT_SELECTION_SIZE];
+static int spot_selection_count[2];
+static int spot_has_selection;
+
+void
+spot_reset_selection(void)
+{
+    memset(spot_selection_count, 0, sizeof(spot_selection_count));
+    spot_has_selection = 0;
+}
+
+static int
+spot_is_selection(int selector)
+{
+    return spot_has_selection && selector >= 0xfa && selector <= 0xfd;
+}
+
+static int
+spot_selected_characters(int selector, Character *characters[SPOT_SELECTION_SIZE])
+{
+    int group = selector & 1;
+    int count = 0;
+    for (int i = 0; i < spot_selection_count[group]; ++i) {
+        int id = spot_selection[group][i];
+        if (character_exists(id))
+            characters[count++] = character_get(id);
+    }
+    if (selector >= 0xfc && count > 1) {
+        characters[0] = characters[lotr_rnd(count) - 1];
+        return 1;
+    }
+    return count;
+}
+
 Character *
 spot_character_get(int id)
 {
@@ -795,6 +969,11 @@ spot_character_get(int id)
             if (party[i]->ring_mode != 0)
                 return party[i];
         return character_get_ringbearer();
+    }
+
+    if (spot_is_selection(id)) {
+        Character *selected[SPOT_SELECTION_SIZE];
+        return spot_selected_characters(id, selected) ? selected[0] : NULL;
     }
 
     if (id == 0xfa || id == 0xfb) {
@@ -918,14 +1097,23 @@ static const char *
 spot_if_party_condition_to_string(int id)
 {
     switch (id) {
+        case 0:
+            return "stat_check";
         case IF_PARTY_CONDITION_HAS_SKILL:
             return "has_skill";
         case IF_PARTY_CONDITION_HAS_ITEM:
             return "has_item";
+        case IF_PARTY_CONDITION_ITEM_CATEGORY:
+            return "item_category";
+        case IF_PARTY_CONDITION_HAS_SPELL:
+        case IF_PARTY_CONDITION_HAS_SPELL_ALT:
+            return "has_spell";
         case IF_PARTY_CONDITION_IN_PARTY:
-            return "in_party";
+            return "actor_flags";
         case IF_PARTY_CONDITION_SIZE:
             return "party_size";
+        case IF_PARTY_CONDITION_MIN_SIZE:
+            return "minimum_party_size";
         case IF_PARTY_CONDITION_HAVE_SILVER:
             return "have_silver";
         default:
@@ -963,12 +1151,13 @@ spot_get_string(CommandSpot *spot)
         spot_string_print("%02x ", spot->data[i]);
     spot_string_print("\n");
 
-    int two_towers = lotr_current_edition()->data_format == LOTR_DATA_TWO_TOWERS;
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int two_towers = format == LOTR_DATA_TWO_TOWERS;
     for (k = 0; k < spot->commands_num; ++k) {
         int command;
 
         i = spot->command_start[k];
-        command = spot_command(spot->data[i], two_towers);
+        command = spot_command(spot->data[i], format);
 
         spot_string_print("%04x: ", i + spot->label_start);
         for (j = 0; j < spot->command_level[k] * 2; ++j)
@@ -1068,6 +1257,16 @@ spot_get_string(CommandSpot *spot)
                                   spot->data[i + 1], spot->data[i + 2]);
                 break;
 
+            case COMMAND_SELECT_CHARACTER:
+                spot_string_print("SELECT_CHARACTER: %s(%02x)",
+                                  spot_character_name(spot->data[i + 1]), spot->data[i + 1]);
+                break;
+
+            case COMMAND_SET_SELECTED_FIELD:
+                spot_string_print("SET_SELECTED_FIELD: %02x = %02x",
+                                  spot->data[i + 1], spot->data[i + 2]);
+                break;
+
             case COMMAND_SET_TMP_LEADER:
                 spot_string_print("SET_TMP_LEADER: %s(%02x)",
                                   spot_character_name(spot->data[i + 1]),
@@ -1156,6 +1355,12 @@ spot_get_string(CommandSpot *spot)
                 spot_string_print("TEXT_PAR: %d", spot->data[i + 1]);
                 break;
 
+            case COMMAND_PARAGRAPH_SEQUENCE:
+                spot_string_print("PARAGRAPH_SEQUENCE:");
+                for (j = 0; j < spot->data[i + 1]; ++j)
+                    spot_string_print(" %d", spot->data[i + 2 + j]);
+                break;
+
             case COMMAND_QUESTION_PAR:
                 spot_string_print("QUESTION_PAR: %d", spot->data[i + 1]);
                 break;
@@ -1165,7 +1370,7 @@ spot_get_string(CommandSpot *spot)
                 for (j = 0; j < spot->data[i + 1]; ++j) {
                     int action = spot->data[i + 2 + j * 5];
                     int param1 = spot->data[i + 3 + j * 5];
-                    int param2 = spot->data[i + 4 + j * 5];
+                    int param2 = spot_action_short_move(spot, i, j) ? 0xff : spot->data[i + 4 + j * 5];
                     const char *param1_str = object_name(param1);
                     const char *param2_str = spot_character_name(param2);
 
@@ -1178,7 +1383,7 @@ spot_get_string(CommandSpot *spot)
                         ("\n           %s(%02x) %s(%02x), %s(%02x): goto %04x",
                          spot_action_to_string(action), action,
                          param1_str, param1, param2_str, param2,
-                         readint(spot->data + i + 5 + j * 5));
+                         spot_action_address(spot, i, j));
                 }
                 break;
 
@@ -1233,6 +1438,10 @@ spot_get_string(CommandSpot *spot)
                 spot_string_print("IF_DAY");
                 break;
 
+            case COMMAND_NO_OPERATION:
+                spot_string_print("NO_OPERATION");
+                break;
+
             case COMMAND_END_OF_GAME:
                 spot_string_print("END_OF_GAME");
                 break;
@@ -1256,6 +1465,14 @@ spot_get_string(CommandSpot *spot)
 
             case COMMAND_IF_GAME_REG:
                 spot_string_print("IF_GAME_REG: %02x", spot->data[i + 1]);
+                break;
+
+            case COMMAND_WAIT_TICKS:
+                spot_string_print("WAIT_TICKS: %u", (unsigned)readint(spot->data + i + 1));
+                break;
+
+            case COMMAND_GAME_REG_OFF:
+                spot_string_print("GAME_REG_OFF: %02x", spot->data[i + 1]);
                 break;
 
             case COMMAND_GAME_REG_ON:
@@ -1299,6 +1516,10 @@ spot_get_string(CommandSpot *spot)
                 spot_string_print("PLAY_AV: av=%d", spot->data[i + 1] + 1);
                 break;
 
+            case COMMAND_CONFINE_COMBAT:
+                spot_string_print("CONFINE_COMBAT");
+                break;
+
             case COMMAND_COMBAT:
                 spot_string_print("COMBAT");
                 break;
@@ -1310,6 +1531,10 @@ spot_get_string(CommandSpot *spot)
                 else
                     spot_string_print("SET_SILVER: amount=%04x",
                                       readint(spot->data + i + 1));
+                break;
+
+            case COMMAND_GET_WHEN_EMPTY:
+                spot_string_print("GET_WHEN_EMPTY");
                 break;
 
             case COMMAND_OBJECTS_HERE:
@@ -1333,16 +1558,21 @@ spot_get_string(CommandSpot *spot)
                 break;
 
             case COMMAND_IF_OBJECTS_HERE:
-                spot_string_print("IF_OBJECTS_HERE: index=%04x, %02x",
-                                  readint(spot->data + i + 1),
-                                  spot->data[i + 3]);
+            case COMMAND_IF_OBJECTS_AT_LEAST: {
+                int at_least = command == COMMAND_IF_OBJECTS_AT_LEAST;
+                const char *name = at_least ? "IF_OBJECTS_AT_LEAST" : "IF_OBJECTS_HERE";
+                if (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD)
+                    spot_string_print("%s: object[%02x] %s %s%02x%s", name,
+                                      spot->data[i + 1], at_least ? ">=" : "==",
+                                      spot->data[i + 2] ? "object[" : "",
+                                      spot->data[i + 3],
+                                      spot->data[i + 2] ? "]" : "");
+                else
+                    spot_string_print("%s: index=%04x, %02x", name,
+                                      readint(spot->data + i + 1), spot->data[i + 3]);
                 break;
+            }
 
-            case COMMAND_IF_OBJECTS_AT_LEAST:
-                spot_string_print("IF_OBJECTS_AT_LEAST: index=%04x, %02x",
-                                  readint(spot->data + i + 1),
-                                  spot->data[i + 3]);
-                break;
 
             case COMMAND_OBJECTS_TO_BUY:
                 spot_string_print("OBJECTS_TO_BUY: ");
@@ -1442,6 +1672,9 @@ int
 spot_start(CommandSpot *spot)
 {
     spot->pos = 0;
+    spot->selected_character_id = -1;
+    spot->paragraph_index = 0;
+    spot->get_requires_empty = 0;
     spot_objects = NULL;
     buy_objects = NULL;
 #ifdef EXTENDED
@@ -1594,6 +1827,13 @@ spot_if_party(Character *character, int a, int b, int c)
                     return 1;
             return 0;
 
+        case IF_PARTY_CONDITION_HAS_SPELL:
+        case IF_PARTY_CONDITION_HAS_SPELL_ALT:
+            for (i = 0; i < character->spells_num; ++i)
+                if (character->spells[i] == b)
+                    return 1;
+            return 0;
+
         case IF_PARTY_CONDITION_IN_PARTY:      /* if is in party */
             if (b == 0x08)
                 return character == game_get_leader();
@@ -1640,6 +1880,149 @@ spot_if_result(CommandSpot *spot, int result)
   continue running command spot
 */
 
+
+static int
+spot_filter_flags(Character *character)
+{
+    return (character->ring_mode ? 0x01 : 0) |
+        (character == game_get_leader() ? 0x08 : 0) |
+        (character->willing_join ? 0x10 : 0) |
+        (game_in_party(character) ? 0x20 : 0) |
+        (character_get_script_flags(character->id) & 0xc6);
+}
+
+/* Unlike the party filter, opcode 3f always takes the first match. */
+static Character *
+spot_select_character(int selector)
+{
+    /* Both DOS executables read these mask/value pairs for F0 through FF. */
+    static const Uint8 masks[] = {32, 32, 32, 32, 8, 8, 8, 1, 1, 1, 32, 32, 0, 0, 8, 0};
+    static const Uint8 values[] = {32, 32, 0, 0, 8, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0};
+
+    if (selector < 0xf0)
+        return spot_character_get(selector);
+
+    int index = selector - 0xf0;
+    for (int id = 0; id < CHARACTERS_NUM; ++id) {
+        if (!character_exists(id))
+            continue;
+        Character *character = character_get(id);
+        if (character->map != map_get_id() ||
+            (!character->actived && !game_in_party(character)))
+            continue;
+        int flags = spot_filter_flags(character);
+        if (flags != 0xef && (flags & masks[index]) == values[index])
+            return character;
+    }
+    return NULL;
+}
+
+
+static int
+spot_filter_candidates(int selector, Character *characters[SPOT_SELECTION_SIZE])
+{
+    static const Uint8 masks[] = {0x20, 0x20, 0x20, 0x20, 8, 8, 8, 1, 1, 1};
+    static const Uint8 values[] = {0x20, 0x20, 0, 0, 8, 0, 0, 1, 0, 0};
+    int count = 0;
+
+    if (selector >= 0xfa && selector <= 0xfd)
+        return spot_selected_characters(selector, characters);
+
+    if (selector < 0xf0) {
+        Character *character = spot_character_get(selector);
+        if (character != NULL)
+            characters[count++] = character;
+        return count;
+    }
+
+    if (selector > 0xf9 && selector != 0xff)
+        return 0;
+
+    for (int i = 0; i < CHARACTERS_NUM && count < SPOT_SELECTION_SIZE; ++i) {
+        if (!character_exists(i))
+            continue;
+        Character *character = character_get(i);
+        if ((!character->actived && !game_in_party(character)) ||
+            character->map != map_get_id())
+            continue;
+        if (selector == 0xff ? character == game_get_leader() :
+            (spot_filter_flags(character) & masks[selector - 0xf0]) != values[selector - 0xf0])
+            continue;
+        characters[count++] = character;
+    }
+
+    if ((selector == 0xf1 || selector == 0xf3 || selector == 0xf6 ||
+         selector == 0xf9 || selector == 0xff) && count > 1) {
+        characters[0] = characters[lotr_rnd(count) - 1];
+        return 1;
+    }
+
+    return count;
+}
+
+static int
+spot_filter_matches(Character *character, int mode, int value, int minimum)
+{
+    switch (mode) {
+        case 0: {
+            int stat;
+            switch (value) {
+                case 0x10: stat = character->dex; break;
+                case 0x11: stat = character->life; break;
+                case 0x12: stat = character->str; break;
+                case 0x13: stat = character->will; break;
+                case 0x15: stat = character->luck; break;
+                case 0x16: stat = character->end; break;
+                default: return 0;
+            }
+            return (Uint8)stat > (Uint8)(minimum + lotr_rnd(101) - 1);
+        }
+        case 1:
+            return spot_if_party(character, IF_PARTY_CONDITION_HAS_SKILL, value, 0);
+        case 2:
+            return spot_if_party(character, IF_PARTY_CONDITION_HAS_ITEM, value, 0);
+        case IF_PARTY_CONDITION_ITEM_CATEGORY:
+            /* DOS reads scratch[count]. The ten initialized entries are
+               FF after the compacted list, and the next BSS byte is zero.
+               Only category 9 has a range that includes zero. */
+            return character->items_num == 10 && value == 9;
+        case IF_PARTY_CONDITION_HAS_SPELL:
+        case IF_PARTY_CONDITION_HAS_SPELL_ALT:
+            return spot_if_party(character, mode, value, 0);
+        case IF_PARTY_CONDITION_IN_PARTY:
+            return (spot_filter_flags(character) & value) != 0;
+        case IF_PARTY_CONDITION_HAVE_SILVER:
+            return game_get_silver() != 0;
+        default:
+            return 0;
+    }
+}
+
+static void
+spot_filter_characters(CommandSpot *spot, int selector, int mode, int value, int minimum)
+{
+    Character *characters[SPOT_SELECTION_SIZE];
+    int count = spot_filter_candidates(selector, characters);
+
+    memset(spot_selection_count, 0, sizeof(spot_selection_count));
+    spot_has_selection = 1;
+    if (!count)
+        return;
+    if (mode == 0x0d) {
+        spot_if_result(spot, game_get_silver() != 0);
+        return;
+    }
+    if (mode > 0x0a || (mode >= 6 && mode <= 9))
+        return;
+
+    for (int i = 0; i < count; ++i) {
+        Character *character = characters[i];
+        int group = spot_filter_matches(character, mode, value, minimum) ?
+            SPOT_MATCHING : SPOT_NONMATCHING;
+        spot_selection[group][spot_selection_count[group]++] = character->id;
+    }
+}
+
 int
 spot_continue(CommandSpot *spot)
 {
@@ -1669,9 +2052,15 @@ spot_continue(CommandSpot *spot)
     while (spot->pos < spot->commands_num) {
         i = spot->command_start[spot->pos];
 
-        switch (spot_command(spot->data[i], two_towers)) {
+        switch (spot_command(spot->data[i], format)) {
 
             case COMMAND_02:
+                if (format == LOTR_DATA_STANDARD || enhanced_cd)
+                    spot_filter_characters(spot, spot->data[i + 1], spot->data[i + 2],
+                                           spot->data[i + 3], spot->data[i + 4]);
+                spot->pos++;
+                break;
+
             case COMMAND_47:
                 spot->pos++;
                 break;
@@ -1680,6 +2069,15 @@ spot_continue(CommandSpot *spot)
                 spot->pos++;
                 spot_if_result(spot, 1);
                 break;
+
+            case COMMAND_WAIT_TICKS: {
+                unsigned ticks = readint(spot->data + i + 1);
+                spot->pos++;
+                /* The DOS wait counts BIOS timer ticks of about 54.925 ms. */
+                if (ticks)
+                    lotr_sleep((ticks * 54925u + 999u) / 1000u);
+                break;
+            }
 
             case COMMAND_UNKNOWN1:
             case COMMAND_UNKNOWN6:
@@ -1717,9 +2115,9 @@ spot_continue(CommandSpot *spot)
             case COMMAND_NPC_QUESTIONS:
                 spot->pos++;
                 character = spot_character_get(spot->data[i + 1]);
-                character->pythontexts = 0;
                 if (character == NULL)
                     break;
+                character->pythontexts = 0;
                 j = 1;
                 i += 2;
                 while (spot->data[i] != 0xff) {
@@ -1744,6 +2142,14 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_NPC_CHANGE_STAT:
                 spot->pos++;
+                if (spot_is_selection(spot->data[i + 1])) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_selected_characters(spot->data[i + 1], selected);
+                    for (j = 0; j < count; ++j)
+                        spot_change_stat(selected[j], spot->data[i + 2], spot->data[i + 3],
+                                         spot->data[i + 4]);
+                    break;
+                }
                 if (spot->data[i + 1] == 0xf0) {
                     party_size = game_get_party_characters(party);
                     for (j = 0; j < party_size; ++j)
@@ -1784,6 +2190,14 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_NPC_RECRUIT:
                 spot->pos++;
+                if (spot_is_selection(spot->data[i + 1])) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_selected_characters(spot->data[i + 1], selected);
+                    for (j = 0; j < count; ++j)
+                        if (!game_in_party(selected[j]))
+                            game_recruit(selected[j], 1);
+                    break;
+                }
                 if (spot->data[i + 1] == 0xfa) {
                     game_set_follow(1);
                     break;
@@ -1800,6 +2214,15 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_NPC_DISMISS:
                 spot->pos++;
+                if (spot_is_selection(spot->data[i + 1])) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_selected_characters(spot->data[i + 1], selected);
+                    for (j = 0; j < count; ++j) {
+                        if (game_get_party_characters(party) > 1 && game_dismiss(selected[j]))
+                            selected[j]->willing_join = 0;
+                    }
+                    break;
+                }
                 if (spot->data[i + 1] == 0xfa) {
                     game_set_follow(0);
                     break;
@@ -1814,9 +2237,26 @@ spot_continue(CommandSpot *spot)
                 }
                 break;
 
+            case COMMAND_SELECT_CHARACTER:
+                character = spot_select_character(spot->data[i + 1]);
+                if (character)
+                    spot->selected_character_id = character->id;
+                spot->pos++;
+                break;
+
+            case COMMAND_SET_SELECTED_FIELD:
+                character = spot_character_get(spot->selected_character_id);
+                /* Both Volume I Ford scripts write the actor activity byte. */
+                if (character && spot->data[i + 1] == 0x47)
+                    character->actived = spot->data[i + 2];
+                spot->pos++;
+                break;
+
             case COMMAND_SET_TMP_LEADER:
                 spot->pos++;
-                character = spot_character_get(spot->data[i + 1]);
+                character = spot_character_get(
+                    (format == LOTR_DATA_STANDARD || enhanced_cd) && spot->data[i + 1] == 0xfe ?
+                    spot->selected_character_id : spot->data[i + 1]);
                 if (character != NULL)
                     game_set_tmp_leader(character);
                 break;
@@ -1832,20 +2272,111 @@ spot_continue(CommandSpot *spot)
                 break;
 
             case COMMAND_ACTION:
+                if (enhanced_cd && spot->get_requires_empty &&
+                    spot_objects && *spot_objects == 0xff) {
+                    for (j = 0; j < spot->data[i + 1]; ++j) {
+                        const Uint8 *entry = spot->data + i + 2 + j * 5;
+                        if (entry[0] != SPOT_ACTION_GET)
+                            continue;
+                        spot->get_requires_empty = 0;
+                        r = spot_goto(spot, spot_action_address(spot, i, j));
+                        if (r >= 0)
+                            return r;
+                        break;
+                    }
+                    if (j < spot->data[i + 1])
+                        break;
+                }
                 return 0;
-
             case COMMAND_TELEPORT:
                 spot->pos++;
+                if (format == LOTR_DATA_STANDARD || enhanced_cd) {
+                    Character *selected[CHARACTERS_NUM];
+                    int selector = spot->data[i + 8];
+                    int count;
+                    if (selector >= 0xf0 && selector <= 0xf9)
+                        count = spot_filter_candidates(selector, selected);
+                    else if (selector >= 0xfa && selector <= 0xfd)
+                        count = spot_selected_characters(selector, selected);
+                    else if (selector == 0xff) {
+                        /* DOS includes active actors with bit 80 clear, except
+                         * for the actor selected by opcode 3f. */
+                        count = 0;
+                        for (int id = 0; id < CHARACTERS_NUM; ++id) {
+                            if (id == spot->selected_character_id || !character_exists(id))
+                                continue;
+                            Character *target = character_get(id);
+                            if (!target->actived || target->map != map_get_id())
+                                continue;
+                            int flags = spot_filter_flags(target);
+                            if (flags != 0xef && !(flags & 0x80))
+                                selected[count++] = target;
+                        }
+                    }
+                    else {
+                        selected[0] = spot_character_get(selector == 0xfe ?
+                            spot->selected_character_id : selector);
+                        count = selected[0] != NULL;
+                    }
+
+                    Character *leader = game_get_leader();
+                    int rel = spot->data[i + 1];
+                    int dir = spot_decode_direction(spot->data[i + 2]);
+                    int x = readint(spot->data + i + 3);
+                    int y = readint(spot->data + i + 5);
+                    int map = spot->data[i + 7];
+                    int move_leader = 0;
+                    for (j = 0; j < count; ++j) {
+                        if (selected[j] == leader)
+                            move_leader = 1;
+                        else
+                            map_character_teleport(selected[j], rel, x, y, dir, map);
+                    }
+                    spot_if_result(spot, count != 0);
+                    if (move_leader) {
+                        leader->action = CHARACTER_STAY;
+                        map_character_teleport(leader, rel, x, y, dir, map);
+                        if (leader->map != map_get_id())
+                            game_load_map(leader->map);
+                    }
+                    if (count)
+                        return 1;
+                    break;
+                }
+                if (spot_is_selection(spot->data[i + 8])) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_selected_characters(spot->data[i + 8], selected);
+                    int rel = spot->data[i + 1];
+                    int dir = spot_decode_direction(spot->data[i + 2]);
+                    int tx = readint(spot->data + i + 3);
+                    int ty = readint(spot->data + i + 5);
+                    int map = spot->data[i + 7];
+                    int move_leader = 0;
+
+                    for (j = 0; j < count; ++j) {
+                        if (selected[j] == game_get_leader())
+                            move_leader = 1;
+                        else
+                            map_character_teleport(selected[j], rel, tx, ty, dir, map);
+                    }
+                    spot_if_result(spot, count != 0);
+                    if (move_leader)
+                        game_leader_teleport(rel, tx, ty, dir, map);
+                    if (count)
+                        return 1;
+                    break;
+                }
                 if (spot->data[i + 8] != 0xf0)
                     character = spot_character_get(spot->data[i + 8]);
                 if (spot->data[i + 8] == 0xf0
                     || character == game_get_leader()) {
+                    /* Loading a new map can free the current command spot. */
+                    spot_if_result(spot, 1);
                     game_leader_teleport(spot->data[i + 1],
                                          readint(spot->data + i + 3),
                                          readint(spot->data + i + 5),
                                          spot_decode_direction(spot->data[i + 2]),
                                          spot->data[i + 7]);
-                    spot_if_result(spot, 1);
                     return 1;
                 }
                 if (character != NULL) {
@@ -1881,13 +2412,58 @@ spot_continue(CommandSpot *spot)
                 spot_if_result(spot, game_get_register(spot->data[i + 1]));
                 break;
 
+            case COMMAND_GAME_REG_OFF:
             case COMMAND_GAME_REG_ON:
                 spot->pos++;
-                game_set_register(spot->data[i + 1], 1);
+                game_set_register(spot->data[i + 1], spot->data[i] == COMMAND_GAME_REG_ON);
                 break;
 
             case COMMAND_IF_PARTY:
                 spot->pos++;
+                /* Hack for one probably broken spot in barrow hills */
+                if (spot->data[i + 1] == 0x5c
+                    && spot->data[i + 2] == 0x0a
+                    && spot->data[i + 3] == 0x20
+                    && spot->data[i + 4] == 0xff) {
+                    party_size = game_get_party_characters(party);
+                    for (j = 0; j < party_size; ++j)
+                        if (spot_if_party
+                            (party[j], IF_PARTY_CONDITION_HAS_SKILL, 0x5c,
+                             0x00))
+                            break;
+
+                    spot_if_result(spot, j < party_size);
+                    break;
+                }
+                if ((format == LOTR_DATA_STANDARD || enhanced_cd) &&
+                    (spot->data[i + 2] == IF_PARTY_CONDITION_SIZE ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_MIN_SIZE)) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_filter_candidates(spot->data[i + 1], selected);
+                    int threshold = spot->data[i + 3];
+                    spot_if_result(spot, count > 0 &&
+                                   (spot->data[i + 2] == IF_PARTY_CONDITION_SIZE ?
+                                    count == threshold : count >= threshold));
+                    break;
+                }
+                if ((format == LOTR_DATA_STANDARD || enhanced_cd) &&
+                    (spot->data[i + 2] == 0 ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_HAS_SKILL ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_HAS_ITEM ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_ITEM_CATEGORY ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_HAS_SPELL ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_HAS_SPELL_ALT ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_IN_PARTY ||
+                     spot->data[i + 2] == IF_PARTY_CONDITION_HAVE_SILVER)) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int count = spot_filter_candidates(spot->data[i + 1], selected);
+                    for (j = 0; j < count; ++j)
+                        if (spot_filter_matches(selected[j], spot->data[i + 2],
+                                                spot->data[i + 3], spot->data[i + 4]))
+                            break;
+                    spot_if_result(spot, j < count);
+                    break;
+                }
                 party_size = game_get_party_characters(party);
                 if (spot->data[i + 1] == 0xf0) {
                     for (j = 0; j < party_size; ++j)
@@ -1899,22 +2475,6 @@ spot_continue(CommandSpot *spot)
                     spot_if_result(spot, j < party_size);
                     break;
                 }
-                /* Hack for one probably broken spot in barrow hills */
-                if (spot->data[i + 1] == 0x5c
-                    && spot->data[i + 2] == 0x0a
-                    && spot->data[i + 3] == 0x20
-                    && spot->data[i + 4] == 0xff) {
-                    for (j = 0; j < party_size; ++j)
-                        if (spot_if_party
-                            (party[j], IF_PARTY_CONDITION_HAS_SKILL, 0x5c,
-                             0x00))
-                            break;
-
-                    spot_if_result(spot, j < party_size);
-                    break;
-                }
-
-
                 character = spot_character_get(spot->data[i + 1]);
                 spot_if_result(spot,
                                spot_if_party(character, spot->data[i + 2],
@@ -1924,18 +2484,29 @@ spot_continue(CommandSpot *spot)
                 break;
 
             case COMMAND_IF_OBJECTS_HERE:
-                spot->pos++;
-                j = readint(spot->data + i + 1);
-                spot_if_result(spot,
-                               map_get_objects()[j] == spot->data[i + 3]);
-                break;
+            case COMMAND_IF_OBJECTS_AT_LEAST: {
+                const Uint8 *objects = map_get_objects();
+                int at_least = spot->data[i] == COMMAND_IF_OBJECTS_AT_LEAST;
+                int index = readint(spot->data + i + 1);
+                int threshold = spot->data[i + 3];
 
-            case COMMAND_IF_OBJECTS_AT_LEAST:
                 spot->pos++;
-                j = readint(spot->data + i + 1);
-                spot_if_result(spot,
-                               map_get_objects()[j] >= spot->data[i + 3]);
+                if (format == LOTR_DATA_STANDARD || enhanced_cd) {
+                    index = spot->data[i + 1];
+                    int indirect = spot->data[i + 2] != 0;
+                    if (index >= MAP_OBJECT_COUNT ||
+                        (indirect && threshold >= MAP_OBJECT_COUNT)) {
+                        spot_if_result(spot, 0);
+                        break;
+                    }
+                    if (indirect)
+                        threshold = objects[threshold];
+                }
+                spot_if_result(spot, at_least ? objects[index] >= threshold :
+                                               objects[index] == threshold);
                 break;
+            }
+
 
             case COMMAND_OBJECT_INC:
                 spot->pos++;
@@ -1953,6 +2524,12 @@ spot_continue(CommandSpot *spot)
                 spot->pos++;
                 j = spot->data[i + 1];
                 map_get_objects()[j] = spot->data[i + 2];
+                break;
+
+            case COMMAND_GET_WHEN_EMPTY:
+                /* DOS 0x3080 clears the latch checked after the stash is emptied. */
+                spot->get_requires_empty = 1;
+                spot->pos++;
                 break;
 
             case COMMAND_SKILLS_HERE:
@@ -1994,7 +2571,10 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_IF_RANDOM:
                 spot->pos++;
-                spot_if_result(spot, lotr_rnd(99) < spot->data[i + 1]);
+                /* Volume I rolls an inclusive 0..100 before comparing. */
+                j = (format == LOTR_DATA_STANDARD || enhanced_cd) ?
+                    lotr_rnd(101) - 1 : lotr_rnd(99);
+                spot_if_result(spot, j < spot->data[i + 1]);
                 break;
 
             case COMMAND_IF_DIRECTION:
@@ -2010,6 +2590,13 @@ spot_continue(CommandSpot *spot)
 
             case COMMAND_FALSE_THEN:
                 if (spot->if_result) {
+                    int target = spot_chest_detect_return(spot, i);
+                    if (target >= 0) {
+                        r = spot_goto(spot, target);
+                        if (r >= 0)
+                            return r;
+                        break;
+                    }
                     spot_next_on_level(spot);
                     spot->pos++;
                 } else
@@ -2045,6 +2632,16 @@ spot_continue(CommandSpot *spot)
                 spot->pos++;
                 return 1;
 
+            case COMMAND_PARAGRAPH_SEQUENCE:
+                /* DOS 0x29A6 reads a count and shows each paragraph in order. */
+                if (spot->paragraph_index < spot->data[i + 1]) {
+                    gui_paragraph(spot->data[i + 2 + spot->paragraph_index++]);
+                    return 1;
+                }
+                spot->paragraph_index = 0;
+                spot->pos++;
+                break;
+
             case COMMAND_QUESTION_PAR:
                 gui_paragraph_question(spot->data[i + 1]);
                 spot->pos++;
@@ -2069,7 +2666,8 @@ spot_continue(CommandSpot *spot)
                 }
                 cartoon_play(name);
 
-                if (spot->data[i + 1] + 1 == 11)
+                if (spot->data[i + 1] + 1 == 11 &&
+                    format != LOTR_DATA_STANDARD && !enhanced_cd)
                     exit(0);    /* You have won */
 
                 graphics_clear_screen();
@@ -2180,6 +2778,34 @@ spot_continue(CommandSpot *spot)
                 break;
 
             case COMMAND_NPC_SET_FLAGS:
+                if (format == LOTR_DATA_STANDARD || enhanced_cd) {
+                    Character *selected[SPOT_SELECTION_SIZE];
+                    int selector = spot->data[i + 1];
+                    int mask = spot->data[i + 2];
+                    int bits = spot->data[i + 3];
+                    int count = spot_filter_candidates(selector, selected);
+
+                    for (j = 0; j < count; ++j) {
+                        Character *target = selected[j];
+                        int flags = character_get_script_flags(target->id);
+                        character_set_script_flags(target->id, (flags & mask) | bits);
+                        target->willing_join = ((spot_filter_flags(target) & mask) | bits) & 0x10 ? 1 : 0;
+                        if (bits == 0x08)
+                            game_set_leader(target);
+                        if (spot_is_selection(selector) && mask == 0xff) {
+                            if (bits == 0x04)
+                                map_attacking_character(target->id);
+                            else if (bits == 0x10)
+                                target->willing_join = 1;
+                            else if (bits == 0x20)
+                                game_recruit(target, 1);
+                        }
+                    }
+                    if (spot_is_selection(selector)) {
+                        spot->pos++;
+                        break;
+                    }
+                }
                 /* FIXME not fully understood */
                 if (spot->data[i + 2] == 0xff && spot->data[i + 3] == 0x4) {
                     /* attack me */
@@ -2207,6 +2833,10 @@ spot_continue(CommandSpot *spot)
                 break;
 
 
+            case COMMAND_CONFINE_COMBAT:
+                spot->pos++;
+                combat_set_confined(1);
+                break;
             case COMMAND_COMBAT:
                 spot->pos++;
                 combat_start();
@@ -2224,10 +2854,19 @@ spot_continue(CommandSpot *spot)
                 gui_died_show(NULL, FALSE);
                 return 0;
 
+            case COMMAND_NO_OPERATION:
+                spot->pos++;
+                break;
+
             case COMMAND_END:
                 return 0;
 
             case COMMAND_END_OF_GAME:
+                if (enhanced_cd) {
+                    spot->pos++;
+                    game_request_title();
+                    return 0;
+                }
                 if (two_towers && !end_game_text_displayed) {
                     gui_message("The game ends here. Now, go grab the books and read the rest of the story.", 0);
                     end_game_text_displayed = 1;
@@ -2289,6 +2928,10 @@ spot_action(CommandSpot *spot, int type, int what, int on_who)
     }
 #endif
 
+    if (type == SPOT_ACTION_GET && spot->get_requires_empty &&
+        (!spot_objects || *spot_objects != 0xff))
+        return 0;
+
     if (spot->pos >= spot->commands_num)
         return 0;
     index = spot->command_start[spot->pos];
@@ -2301,12 +2944,14 @@ spot_action(CommandSpot *spot, int type, int what, int on_who)
         s_what = spot->data[index + 2 + i * 5 + 1];
         if (s_type == SPOT_ACTION_MOVE)
             s_what = spot_decode_direction(s_what);
-        s_on_who = spot->data[index + 2 + i * 5 + 2];
+        s_on_who = spot_action_short_move(spot, index, i) ? 0xff : spot->data[index + 4 + i * 5];
 
         if ((s_type == 0xff || s_type == type) &&
             (s_what == 0xff || s_what == what) &&
             (s_on_who == 0xff || s_on_who == on_who)) {
-            spot_goto(spot, readint(spot->data + index + 2 + i * 5 + 3));
+            if (type == SPOT_ACTION_GET)
+                spot->get_requires_empty = 0;
+            spot_goto(spot, spot_action_address(spot, index, i));
 
             quit_menu();
             game_continue_spot();
@@ -2341,7 +2986,7 @@ spot_has_action(CommandSpot *spot, int type, int what, int on_who)
         return pythonspot_has_action(spot->id, type, what, on_who);
 #endif
 
-    if (spot->pos > spot->commands_num)
+    if (spot->pos >= spot->commands_num)
         return 0;
     index = spot->command_start[spot->pos];
 
@@ -2353,7 +2998,7 @@ spot_has_action(CommandSpot *spot, int type, int what, int on_who)
         s_what = spot->data[index + 2 + i * 5 + 1];
         if (s_type == SPOT_ACTION_MOVE)
             s_what = spot_decode_direction(s_what);
-        s_on_who = spot->data[index + 2 + i * 5 + 2];
+        s_on_who = spot_action_short_move(spot, index, i) ? 0xff : spot->data[index + 4 + i * 5];
         if ((s_type == 0xff || s_type == type) &&
             (s_what == 0xff || s_what == what) &&
             (s_on_who == 0xff || s_on_who == on_who))

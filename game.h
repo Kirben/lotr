@@ -35,6 +35,8 @@
 
 /* starts a new game */
 extern void game_new(void);
+extern void game_request_title(void);
+extern int game_title_requested(void);
 
 /* save game */
 extern int game_save(int n);

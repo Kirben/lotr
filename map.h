@@ -196,6 +196,7 @@ extern int map_npc_stay_near(Character *character, int codes[10],
 
 
 /* get map obejcts */
+#define MAP_OBJECT_COUNT 0x70
 extern Uint8 *map_get_objects(void);
 
 /* get map register */

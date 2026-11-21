@@ -153,6 +153,7 @@ CommandSpot *game_actual_spot;
 
 #ifdef DEMO
 int demo_state = 0;
+void demo_frame(void);
 #endif
 
 
@@ -280,7 +281,9 @@ game_load_map(int map)
     character_fill_map(map, 0xff);
 
     for (i = 0; i < game_party_size; ++i)
-        map_unique_add_character(game_party[i]);
+        if ((format != LOTR_DATA_STANDARD && format != LOTR_DATA_ENHANCED_CD) ||
+            game_party[i]->map == map)
+            map_unique_add_character(game_party[i]);
 
     game_timer = -1;
 
@@ -297,11 +300,30 @@ game_load_map(int map)
   starts a new game
 */
 
+static int game_return_to_title;
+
+void
+game_request_title(void)
+{
+    game_return_to_title = 1;
+}
+
+int
+game_title_requested(void)
+{
+    return game_return_to_title;
+}
+
 void
 game_new(void)
 {
 
     int i;
+
+    game_return_to_title = 0;
+    combat_set_confined(0);
+    spot_reset_selection();
+    characters_reset_script_flags();
 
     if (lotr_current_edition()->audio != LOTR_AUDIO_CD)
         play_music();
@@ -589,6 +611,8 @@ game_load(int n)
         return 0;
     }
 
+    combat_set_confined(0);
+    spot_reset_selection();
     node = lotr_get_subnode(root, (const xmlChar *)"characters", 1);
     characters_load(node);
 
@@ -744,7 +768,7 @@ game_leader_movement(void)
 #endif
 
 #ifdef ENABLE_CHEATS
-    if (lotr_key_shift() || lotr_key_ctrl())
+    if (game_moving && (lotr_key_shift() || lotr_key_ctrl()))
 #else
     if (0)
 #endif
@@ -795,6 +819,11 @@ game_leader_movement(void)
 
         }
 
+        /* A scripted teleport can enter a new encounter while movement
+         * is locked. Run the spot above, then suppress keyboard movement. */
+        if (!game_moving)
+            return;
+
         if (lotr_key_left()
             && map_can_move_to(leader, leader->x / 4 - 1, leader->y / 4))
             character_move_left(leader);
@@ -838,6 +867,8 @@ game_follow_leader(void)
 
     int i, j, try;
     int next_x, next_y;
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int volume_one = format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD;
 
     if (!game_follow)
         return;
@@ -846,7 +877,7 @@ game_follow_leader(void)
     leader->next_y = 0;
 
     for (i = 0; i < game_party_size; ++i) {
-        if (game_party[i] == leader)
+        if (game_party[i] == leader || (volume_one && game_party[i]->map != leader->map))
             continue;
 
         if (abs(game_party[i]->x - leader->x) > 4 * 16 ||
@@ -938,11 +969,6 @@ game_follow_leader(void)
 
 
 
-#ifdef DEMO
-void demo_frame(void);
-#endif
-
-
 /*
   proceed to the next game frame
 */
@@ -950,7 +976,6 @@ void demo_frame(void);
 void
 game_next_frame(void)
 {
-
     if (combat_frame())
         goto end_next_frame;
 
@@ -1038,10 +1063,9 @@ exit_found:
                 }
             }
 
-        if (game_moving) {
-            game_leader_movement();
+        game_leader_movement();
+        if (game_moving)
             game_follow_leader();
-        }
 
     } else {                    /* if( !game_spot_running  ) */
 
@@ -1453,13 +1477,17 @@ game_leader_teleport(int rel, int x, int y, int dir, int map)
 
     int i;
     int result = 0;
+    LotrDataFormat format = lotr_current_edition()->data_format;
 
     leader->action = CHARACTER_STAY;
 
     if (map != 0xff && map != game_map_id) {
         game_load_map(map);
-        for (i = 0; i < game_party_size; ++i)
+        for (i = 0; i < game_party_size; ++i) {
+            if (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD)
+                game_party[i]->map = map;
             map_unique_add_character(game_party[i]);
+        }
         result = 1;
     }
 

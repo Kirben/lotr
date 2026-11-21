@@ -93,7 +93,7 @@ cdef extern from "map.h":
     CommandSpot* map_get_pythonspot(int)
 
 cdef extern from "utils.h":
-    char *lotr_data_directory()
+    const char *lotr_data_directory()
 
 
 

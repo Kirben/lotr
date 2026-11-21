@@ -129,7 +129,7 @@ CommandSpot *map_pythonspots[MAX_PYTHON_SPOTS];
 
 /* map registers */
 Uint8 map_registers[16];
-Uint8 map_objects[128 - 16];
+Uint8 map_objects[MAP_OBJECT_COUNT];
 
 
 #define DAY_FADE 100
@@ -1246,7 +1246,7 @@ map_get_spot_by_addr(int address)
     for (i = 0; i < map_num_spots; ++i) {
         CommandSpot *spot = map_spots[i];
         if (spot->label_start <= address
-            && address <= spot->label_start + spot->data_size) {
+            && address < spot->label_start + spot->data_size) {
             return spot;
         }
     }
@@ -1466,7 +1466,14 @@ map_character_teleport(Character *character, int rel, int x, int y, int dir,
     leader = game_get_leader();
     character->actived = 1;
 
-    if (rel) {
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    if (rel && (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD)) {
+        /* Volume I applies signed word offsets to the leader's position. */
+        if (x != 0xffff)
+            character->x = leader->x + (x >= 0x8000 ? x - 0x10000 : x);
+        if (y != 0xffff)
+            character->y = leader->y + (y >= 0x8000 ? y - 0x10000 : y);
+    } else if (rel) {
         if (x > 0x8000)
             character->x = leader->x + x - 0xffff;
         else
@@ -1491,6 +1498,9 @@ map_character_teleport(Character *character, int rel, int x, int y, int dir,
 
     if (dir != 0xff)
         character->direction = dir;
+
+    if (map == 0xff && (format == LOTR_DATA_STANDARD || format == LOTR_DATA_ENHANCED_CD))
+        map = map_id;
 
     if ((map != 0xff && map != map_id) ||
         (map == 0xff && character->map != map_id)) {

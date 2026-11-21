@@ -111,6 +111,7 @@ main(int argc, char *argv[])
         exit(1);
     }
 
+play_game:
     lotr_init();
 
     if (lotr_current_edition()->volume == 2)
@@ -145,7 +146,7 @@ main(int argc, char *argv[])
     if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
         play_music();
 
-    while (!lotr_key_esc()) {
+    while (!lotr_key_esc() && !game_title_requested()) {
         int frame_time = FRAME_TIME;
         lotr_poll_events();
         game_next_frame();
@@ -162,7 +163,12 @@ main(int argc, char *argv[])
     }
 
 
+    int return_to_title = game_title_requested();
     lotr_close();
+    if (return_to_title) {
+        game_num = -1;
+        goto play_game;
+    }
 
     return 0;
 }

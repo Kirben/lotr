@@ -98,6 +98,9 @@ extern void characters_init();
 
 /* close characters */
 extern void characters_close();
+extern int character_get_script_flags(int id);
+extern void character_set_script_flags(int id, int flags);
+extern void characters_reset_script_flags(void);
 
 /* save characters */
 extern void characters_save(xmlNodePtr node);

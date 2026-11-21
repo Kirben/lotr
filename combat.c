@@ -58,6 +58,7 @@ int combat_party_size;
 Character *active_character;
 
 int combat_mode = 0;
+static int combat_confined;
 
 
 /* size of combat area */
@@ -94,6 +95,23 @@ combat_in_grid(int x, int y)
     return x >= 0 && x < COMBAT_WIDTH && y >= 0 && y < COMBAT_HEIGHT;
 }
 
+void
+combat_set_confined(int confined)
+{
+    combat_confined = confined;
+}
+
+static int
+combat_in_bounds(int x, int y)
+{
+    if (combat_confined) {
+        /* The DOS 36-by-15 movement rectangle starts 19 tiles left
+           and seven tiles above the combat center. */
+        return x >= 0 && x < 36 && y >= 1 && y < 16;
+    }
+    return combat_in_grid(x, y);
+}
+
 /*
   combat was loosed
 */
@@ -102,6 +120,7 @@ void
 combat_loosed(void)
 {
     combat_mode = 0;
+    combat_set_confined(0);
     gui_died_show
         ("Entire party is dead. Sauron has finally recovered the Ring. Your quest is Over.",
          TRUE);
@@ -119,6 +138,7 @@ combat_won(void)
     int i;
 
     combat_mode = 0;
+    combat_set_confined(0);
     music_combat_won();
     game_set_party_characters(combat_party, combat_party_size);
 
@@ -275,7 +295,7 @@ combat_area_init(void)
         for (j = 0; j < COMBAT_HEIGHT; ++j) {
             x = combat_x + i;
             y = combat_y + j;
-            if (terrain_free(x, y + 1) &&
+            if (combat_in_bounds(i, j) && terrain_free(x, y + 1) &&
                 terrain_free(x + 1, y + 1) && terrain_free(x + 2, y + 1))
                 combat_area[i][j] = 1000;
             else
@@ -577,7 +597,7 @@ combat_player_can_move(int dx, int dy)
 {
     int x = active_character->x / 4 + dx;
     int y = active_character->y / 4 + dy;
-    return combat_in_grid(x - combat_x, y - combat_y) &&
+    return combat_in_bounds(x - combat_x, y - combat_y) &&
         map_can_move_to(active_character, x, y);
 }
 
@@ -1141,10 +1161,10 @@ combat_attack(Character *who, Character *whom)
                  attack_type, whom->name);
     }
 
-    if (hits)
-        sound_play(10);
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
+        sound_play(hits ? 13 : 17);  /* HIT1 / MISS1 */
     else
-        sound_play(11);
+        sound_play(hits ? 10 : 11);
 
     combat_attack_animation = 1;
 

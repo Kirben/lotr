@@ -45,6 +45,27 @@
 #include "characters_pos_ttt.h"
 
 Character *lotr_characters[CHARACTERS_NUM];
+static Uint8 character_archive_flags[CHARACTERS_NUM];
+static Uint8 character_script_flags[CHARACTERS_NUM];
+
+int
+character_get_script_flags(int id)
+{
+    return id >= 0 && id < CHARACTERS_NUM ? character_script_flags[id] : 0;
+}
+
+void
+character_set_script_flags(int id, int flags)
+{
+    if (id >= 0 && id < CHARACTERS_NUM)
+        character_script_flags[id] = flags;
+}
+
+void
+characters_reset_script_flags(void)
+{
+    memcpy(character_script_flags, character_archive_flags, sizeof(character_script_flags));
+}
 
 
 
@@ -54,7 +75,8 @@ typedef struct
     Uint8 shape;                /* 6 */
     Uint8 unknown6[3];          /* 7 */
     Uint8 direction;            /* 10 */
-    Uint8 unknown7[2];          /* 11 */
+    Uint8 flags;                /* 11 */
+    Uint8 unknown7;             /* 12 */
     Uint8 silver;               /* 13 */
     Uint8 horse_shape;          /* 14 */
     Uint8 unknown8;             /* 15 */
@@ -214,6 +236,8 @@ characters_init()
         lotr_characters[i]->luck = chardata->luck;
         lotr_characters[i]->will = chardata->will;
 
+        character_archive_flags[i] = chardata->flags;
+        character_script_flags[i] = chardata->flags;
         lotr_characters[i]->id = i;     /* chardata->id; */
         lotr_characters[i]->party_id = 0xff;
         lotr_characters[i]->actived = 0;
@@ -356,6 +380,9 @@ characters_save(xmlNodePtr node)
             if (lotr_current_edition()->volume == 2)
                 lotr_save_prop_int(cur, "party", lotr_characters[i]->party_id);
             lotr_save_prop_int(cur, "actived", lotr_characters[i]->actived);
+            if (lotr_current_edition()->volume == 1 &&
+                character_script_flags[i] != character_archive_flags[i])
+                lotr_save_prop_int(cur, "script_flags", character_script_flags[i]);
             lotr_save_prop_int(cur, "last_eat", lotr_characters[i]->last_eat);
             lotr_save_prop_int(cur, "willing_join",
                                lotr_characters[i]->willing_join);
@@ -446,6 +473,8 @@ characters_load(xmlNodePtr node)
 
             if (lotr_current_edition()->volume == 2)
                 lotr_characters[i]->party_id = lotr_load_prop_int(cur, "party");
+            character_script_flags[i] =
+                lotr_load_prop_int_default(cur, "script_flags", character_archive_flags[i]);
             lotr_characters[i]->actived = lotr_load_prop_int(cur, "actived");
             lotr_characters[i]->last_eat =
                 lotr_load_prop_int(cur, "last_eat");

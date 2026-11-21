@@ -57,6 +57,9 @@ typedef struct
     int if_result;
     int command_start[SPOT_MAX_COMMANDS];
     int command_level[SPOT_MAX_COMMANDS];
+    int selected_character_id;
+    int paragraph_index;
+    int get_requires_empty;
 } CommandSpot;
 
 
@@ -115,6 +118,7 @@ extern int spot_question_letter(Uint8 c);
 /* return character
   (including special characters like leader/ ringbearer, etc...) */
 extern Character *spot_character_get(int id);
+extern void spot_reset_selection(void);
 
 
 #endif /* _SPOT_H */

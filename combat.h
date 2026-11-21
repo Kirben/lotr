@@ -33,6 +33,7 @@
 
 /* start combat */
 extern void combat_start(void);
+extern void combat_set_confined(int confined);
 
 /* genocide monsters */
 extern void combat_genocide(void);
