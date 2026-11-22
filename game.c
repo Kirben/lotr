@@ -105,7 +105,7 @@ static const int two_towers_maps[][3] = { {0x7, 0x0, 0x2},
 {0x117, 0x110, 0x112},
 {0x11f, 0x110, 0x11a},
 {0x127, 0x120, 0x122},
-{0x12f, 0x120, 0xa},
+{0, 0, 0}, /* Map 7 has no data in retail MAP1. */
 {0x137, 0x130, 0x132},
 {0x13f, 0x130, 0x13a},
 {0x147, 0x140, 0x142},
@@ -201,24 +201,39 @@ game_parse_texts(Archive *archive, int index)
   loads a map
 */
 
-void
+static const int *
+game_map_resources(int map)
+{
+    LotrDataFormat format = lotr_current_edition()->data_format;
+    int towers = format == LOTR_DATA_TWO_TOWERS;
+    const int (*maps)[3] = towers ? two_towers_maps : fellowship_maps;
+    size_t count = towers ? sizeof(two_towers_maps) / sizeof(two_towers_maps[0]) :
+                            sizeof(fellowship_maps) / sizeof(fellowship_maps[0]);
+
+    if (map < 0 || (size_t)map >= count || !maps[map][0] ||
+        (format == LOTR_DATA_DEMO && map > 0))
+        return NULL;
+    return maps[map];
+}
+
+int
+game_map_available(int map)
+{
+    return game_map_resources(map) != NULL;
+}
+
+int
 game_load_map(int map)
 {
+    const int *resources = game_map_resources(map);
+    if (!resources) {
+        fprintf(stderr, "lotr: map %d is unavailable in this edition.\n", map);
+        return 0;
+    }
     Archive *archive;
     int i;
     LotrDataFormat format = lotr_current_edition()->data_format;
     int two_towers = format == LOTR_DATA_TWO_TOWERS;
-    const int (*game_maps)[3] = two_towers ? two_towers_maps : fellowship_maps;
-    size_t map_count = two_towers ?
-        sizeof(two_towers_maps) / sizeof(two_towers_maps[0]) :
-        sizeof(fellowship_maps) / sizeof(fellowship_maps[0]);
-
-    if (map < 0 || (size_t)map >= map_count || !game_maps[map][0]
-        || (format == LOTR_DATA_DEMO && map > 0))
-    {
-        fprintf(stderr, "lotr: not existing map index=%d\n", map);
-        exit(1);
-    }
     if (two_towers)
         map_exit_building();
 
@@ -227,29 +242,29 @@ game_load_map(int map)
     graphics_update_screen();
     lotr_reset_keyboard();
 
-    if (game_maps[map][0] != loaded_map_desc) {
-        archive = archive_open_map(game_maps[map][0]);
-        map_set_map(archive, map, game_maps[map][0] % 0x100);
+    if (resources[0] != loaded_map_desc) {
+        archive = archive_open_map(resources[0]);
+        map_set_map(archive, map, resources[0] % 0x100);
         archive_close(archive);
-        loaded_map_desc = game_maps[map][0];
+        loaded_map_desc = resources[0];
     }
 
 
-    if (game_maps[map][1] != loaded_map_spots) {
-        archive = archive_open_map(game_maps[map][1]);
+    if (resources[1] != loaded_map_spots) {
+        archive = archive_open_map(resources[1]);
 
-        game_parse_texts(archive, game_maps[map][1] % 0x100 + 1);
+        game_parse_texts(archive, resources[1] % 0x100 + 1);
 
         if (game_map_id >= 0) {
             map_save(game_map_saves[game_map_id / 2]);
             game_map_saved[game_map_id / 2] = 1;
         }
-        map_set_spots(archive, game_maps[map][1] % 0x100);
+        map_set_spots(archive, resources[1] % 0x100);
         if (game_map_saved[map / 2])
             map_load(game_map_saves[map / 2]);
 
         archive_close(archive);
-        loaded_map_spots = game_maps[map][1];
+        loaded_map_spots = resources[1];
         game_actual_spot = NULL;
         game_spot_running = 0;
     }
@@ -257,15 +272,15 @@ game_load_map(int map)
 
     game_map_id = map;
 
-    if (game_maps[map][2] != loaded_map_graphics) {
-        archive = archive_open_map(game_maps[map][2]);
-        map_set_tiles(archive, game_maps[map][2] % 0x100,
-                      game_maps[map][2] % 0x100 + 1,
-                      game_maps[map][2] % 0x100 + 2,
-                      game_maps[map][2] % 0x100 + 4);
-        map_set_palette_resource(archive, game_maps[map][2] % 0x100 + 3);
+    if (resources[2] != loaded_map_graphics) {
+        archive = archive_open_map(resources[2]);
+        map_set_tiles(archive, resources[2] % 0x100,
+                      resources[2] % 0x100 + 1,
+                      resources[2] % 0x100 + 2,
+                      resources[2] % 0x100 + 4);
+        map_set_palette_resource(archive, resources[2] % 0x100 + 3);
         archive_close(archive);
-        loaded_map_graphics = game_maps[map][2];
+        loaded_map_graphics = resources[2];
     }
 
     character_fill_map(map, 0xff);
@@ -282,7 +297,7 @@ game_load_map(int map)
 #endif
 
     gui_clear();
-
+    return 1;
 }
 
 
@@ -602,6 +617,12 @@ game_load(int n)
         return 0;
     }
 
+    int map = lotr_load_prop_int(root, "game_map_id");
+    if (!game_map_available(map)) {
+        xmlFreeDoc(doc);
+        return 0;
+    }
+
     combat_set_confined(0);
     spot_reset_selection();
     node = lotr_get_subnode(root, (const xmlChar *)"characters", 1);
@@ -641,7 +662,7 @@ game_load(int n)
     loaded_map_spots = loaded_map_desc = loaded_map_graphics = -1;
     game_map_id = -1;
 
-    game_load_map(lotr_load_prop_int(root, "game_map_id"));
+    game_load_map(map);
 
 
     node = lotr_get_subnode(root, (const xmlChar *)"map", 1);
@@ -1462,6 +1483,9 @@ game_leader_teleport(int rel, int x, int y, int dir, int map)
     int i;
     int result = 0;
     LotrDataFormat format = lotr_current_edition()->data_format;
+
+    if (map != 0xff && !game_map_available(map))
+        return 0;
 
     leader->action = CHARACTER_STAY;
 

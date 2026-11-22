@@ -2274,6 +2274,11 @@ spot_continue(CommandSpot *spot)
                 return 0;
             case COMMAND_TELEPORT:
                 spot->pos++;
+                if (two_towers && spot->data[i + 7] != 0xff &&
+                    !game_map_available(spot->data[i + 7])) {
+                    spot_if_result(spot, 0);
+                    break;
+                }
                 if (format == LOTR_DATA_STANDARD || enhanced_cd) {
                     Character *selected[CHARACTERS_NUM];
                     int selector = spot->data[i + 8];

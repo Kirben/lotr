@@ -101,7 +101,8 @@ extern void game_set_party_characters(Character *party[11], int size);
 
 
 /* loads a map */
-extern void game_load_map(int map);
+extern int game_map_available(int map);
+extern int game_load_map(int map);
 
 
 /* recruit character to the party */
