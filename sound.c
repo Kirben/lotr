@@ -41,8 +41,6 @@
 #include "sounds_cd.h"
 #define ARCHIVE_SOUND_COUNT 25
 
-Uint8 *music_data;
-int music_size;
 static int music_muted;
 
 enum { SOUND_CAPACITY = 36 };
@@ -108,9 +106,6 @@ load_archive_sounds(void)
             sound_data[i][13] = tempo & 0xff;
         }
     }
-
-    music_data = sound_data[MUSIC_MAIN_INDEX];
-    music_size = sound_sizes[MUSIC_MAIN_INDEX];
 
     archive_close(archive);
 }
@@ -264,24 +259,10 @@ load_towers_sounds(void)
     }
 }
 
-static void
-play_towers_sound(int index, int loop)
-{
-    if (index < 0 || index >= SDL_arraysize(towers_sound_names) || !sound_data[index])
-        return;
-    if (towers_sampled[index])
-        play_sample(sound_data[index], sound_sizes[index], LOTR_PCM_U8);
-    else if (!music_muted)
-        play_midi(sound_data[index], sound_sizes[index], loop);
-}
-
-
 void
 sound_init(void)
 {
     LotrAudio audio = lotr_current_edition()->audio;
-    music_data = NULL;
-    music_size = 0;
     if (audio == LOTR_AUDIO_ARCHIVE)
         load_archive_sounds();
     else if (audio == LOTR_AUDIO_CD)
@@ -312,70 +293,91 @@ sound_close(void)
 }
 
 
-/*
-  sound play
-*/
+typedef enum { SOUND_PCM, SOUND_MIDI, SOUND_STREAM } SoundSource;
+
+/* Return whether a cue was dispatched, so CD music can try the next file. */
+static int
+play_cue(SoundSource source, int index, const char *filename, int loop)
+{
+    if (source == SOUND_STREAM) {
+        if (music_muted || midi_disabled)
+            return 0;
+        FILE *file = lotr_try_open_asset(filename, 0);
+        if (!file)
+            return 0;
+        play_music_file(file, loop);
+        return 1;
+    }
+
+    if (index < 0 || index >= SOUND_CAPACITY)
+        return 0;
+    if (source == SOUND_PCM) {
+        play_sample(sound_data[index], sound_sizes[index], LOTR_PCM_U8);
+    } else {
+        if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS &&
+            (music_muted || !sound_data[index]))
+            return 0;
+        play_midi(sound_data[index], sound_sizes[index], loop);
+    }
+    return 1;
+}
 
 void
 sound_play(int index)
 {
-
-    LotrAudio audio = lotr_current_edition()->audio;
-    if (audio == LOTR_AUDIO_ARCHIVE) {
-        if (index > 8)
-            play_sample(sound_data[index - 8], sound_sizes[index - 8], LOTR_PCM_U8);
-        else
-            play_midi(sound_data[index + 8], sound_sizes[index + 8], 0);
-    } else if (audio == LOTR_AUDIO_CD && index >= 0 && index <= 0x0a) {
-        /* Play scripted CD cues once, using the ranges extracted from the disc. */
-        if (!midi_disabled && !music_muted) {
-            char name[sizeof("cd-cue-00.wav")];
-            snprintf(name, sizeof(name), "cd-cue-%02X.wav", (unsigned)index);
-            FILE *file = lotr_try_open_asset(name, 0);
-            if (file)
-                play_music_file(file, 0);
-        }
-    } else if (audio == LOTR_AUDIO_CD && index >= 11 &&
-               index - 11 < CD_SOUND_COUNT) {
-        play_sample(sound_data[index - 11], sound_sizes[index - 11], LOTR_PCM_U8);
-    } else if (audio == LOTR_AUDIO_TOWERS) {
-        play_towers_sound(index, 0);
+    if (index < 0)
+        return;
+    switch (lotr_current_edition()->audio) {
+        case LOTR_AUDIO_ARCHIVE:
+            if (index > 8)
+                play_cue(SOUND_PCM, index - 8, NULL, 0);
+            else
+                play_cue(SOUND_MIDI, index + 8, NULL, 0);
+            break;
+        case LOTR_AUDIO_CD:
+            if (index <= 0x0a) {
+                char name[sizeof("cd-cue-00.wav")];
+                snprintf(name, sizeof(name), "cd-cue-%02X.wav", (unsigned)index);
+                play_cue(SOUND_STREAM, 0, name, 0);
+            } else if (index - 11 < CD_SOUND_COUNT) {
+                play_cue(SOUND_PCM, index - 11, NULL, 0);
+            }
+            break;
+        case LOTR_AUDIO_TOWERS:
+            if (index < SDL_arraysize(towers_sampled))
+                play_cue(towers_sampled[index] ? SOUND_PCM : SOUND_MIDI, index, NULL, 0);
+            break;
     }
-
 }
-
-
-
-/*
-  play the main music track
-*/
 
 void
 play_music(void)
 {
-    if (lotr_current_edition()->audio == LOTR_AUDIO_CD) {
-        if (midi_disabled || music_muted)
-            return;
-        const char *tracks[] = {"cd-track-02.wav", "cd-track-03.wav", "cd-track-04.wav"};
-        static int selected = -1;
-        int first = selected < 0 ? SDL_GetTicks() % 3 : selected;
-        for (int i = 0; i < 3; ++i) {
-            int index = (first + i) % 3;
-            FILE *file = lotr_try_open_asset(tracks[index], 0);
-            if (file) {
-                selected = index;
-                play_music_file(file, 1);
-                return;
+    switch (lotr_current_edition()->audio) {
+        case LOTR_AUDIO_ARCHIVE:
+            play_cue(SOUND_MIDI, MUSIC_MAIN_INDEX, NULL, 1);
+            break;
+        case LOTR_AUDIO_TOWERS:
+            play_cue(towers_sampled[TOWERS_WALKING] ? SOUND_PCM : SOUND_MIDI,
+                     TOWERS_WALKING, NULL, 1);
+            break;
+        case LOTR_AUDIO_CD: {
+            static const char *const tracks[] = {
+                "cd-track-02.wav", "cd-track-03.wav", "cd-track-04.wav"
+            };
+            static int selected = -1;
+            int first = selected < 0 ? SDL_GetTicks() % 3 : selected;
+            for (int i = 0; i < 3; ++i) {
+                int index = (first + i) % 3;
+                if (play_cue(SOUND_STREAM, 0, tracks[index], 1)) {
+                    selected = index;
+                    break;
+                }
             }
+            break;
         }
-        return;
     }
-    if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
-        play_towers_sound(TOWERS_WALKING, TRUE);
-    else
-        play_midi(music_data, music_size, TRUE);
 }
-
 
 /*
   starts stop playing the music track
@@ -393,64 +395,40 @@ toggle_music(void)
 }
 
 
-/*
-  play music if spell was performed
-*/
-
 void
 music_spell_performed(void)
 {
-    LotrAudio audio = lotr_current_edition()->audio;
-    if (audio == LOTR_AUDIO_ARCHIVE)
-        play_midi(sound_data[15], sound_sizes[15], 0);
-    else if (audio == LOTR_AUDIO_CD)
-        play_sample(sound_data[0], sound_sizes[0], LOTR_PCM_U8);
-    else if (audio == LOTR_AUDIO_TOWERS)
-        play_towers_sound(TOWERS_MAGIC_SUCCESS, 0);
+    switch (lotr_current_edition()->audio) {
+        case LOTR_AUDIO_ARCHIVE: sound_play(7); break;
+        case LOTR_AUDIO_CD: sound_play(11); break;
+        case LOTR_AUDIO_TOWERS: sound_play(TOWERS_MAGIC_SUCCESS); break;
+    }
 }
-
-
-/*
-  play music if spell failed
-*/
 
 void
 music_spell_failed(void)
 {
-    LotrAudio audio = lotr_current_edition()->audio;
-    if (audio == LOTR_AUDIO_ARCHIVE)
-        play_midi(sound_data[16], sound_sizes[16], 0);
-    else if (audio == LOTR_AUDIO_CD)
-        play_sample(sound_data[1], sound_sizes[1], LOTR_PCM_U8);
-    else if (audio == LOTR_AUDIO_TOWERS)
-        play_towers_sound(TOWERS_MAGIC_FAILURE, 0);
+    switch (lotr_current_edition()->audio) {
+        case LOTR_AUDIO_ARCHIVE: sound_play(8); break;
+        case LOTR_AUDIO_CD: sound_play(12); break;
+        case LOTR_AUDIO_TOWERS: sound_play(TOWERS_MAGIC_FAILURE); break;
+    }
 }
-
-
-
-/*
-  play music if combat started
-*/
 
 void
 music_combat_started(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
-        play_midi(sound_data[21], sound_sizes[21], 0);
+        play_cue(SOUND_MIDI, 21, NULL, 0);
     else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
-        play_towers_sound(TOWERS_BATTLE, 0);
+        sound_play(TOWERS_BATTLE);
 }
-
-
-/*
-  play music if combat was won
- */
 
 void
 music_combat_won(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
-        play_midi(sound_data[22], sound_sizes[22], 0);
+        play_cue(SOUND_MIDI, 22, NULL, 0);
     else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
-        play_towers_sound(TOWERS_SUCCESS, 0);
+        sound_play(TOWERS_SUCCESS);
 }
