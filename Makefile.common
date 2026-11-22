@@ -18,9 +18,9 @@ else
 endif
 
 HEADERFILES = archive.h av.h cartoon.h character.h combat.h credit.h lotr.h lotr_sdl.h map.h midi.h game.h graphics.h gui.h init.h object.h shape.h sound.h spot.h timing.h utils.h
-PLAYCARTOONOBJ = archive.o cartoon.o $(LOTR_SDL_OBJ) midi.o graphics.o sound.o timing.o utils.o
+PLAYCARTOONOBJ = archive.o cartoon.o $(LOTR_SDL_OBJ) midi.o graphics.o sound.o timing.o utils.o voc.o
 PLAYAVOBJ = archive.o av.o $(LOTR_SDL_OBJ) midi.o graphics.o timing.o utils.o
-OBJFILES = archive.o av.o cartoon.o character.o combat.o $(LOTR_SDL_OBJ) map.o midi.o game.o gui.o graphics.o init.o object.o shape.o sound.o spot.o timing.o utils.o
+OBJFILES = archive.o av.o cartoon.o character.o combat.o $(LOTR_SDL_OBJ) map.o midi.o game.o gui.o graphics.o init.o object.o shape.o sound.o spot.o timing.o utils.o voc.o
 
 ifeq ($(USE_SDL_MIXER),1)
 DEFINITIONS += -DHAVE_SDL_MIXER
@@ -49,11 +49,15 @@ endif
 
 all: lotr
 
-.PHONY: all clean
+.PHONY: all clean check-voc
 clean:
 	rm -f *.o *~ core.* pythonspot.c playcartoon lotr lotr.static \
-		pythonspot.pxi pythonspot.h playav lotr.exe playcartoon.exe playav.exe
+		pythonspot.pxi pythonspot.h playav lotr.exe playcartoon.exe playav.exe tests/voc-test tests/voc-test.exe
 
+
+check-voc:
+	$(CC) $(CFLAGS) tests/voc.c voc.c -o tests/voc-test
+	./tests/voc-test
 
 lotr: $(OBJFILES) $(SELECTOR_OBJ) lotr.o
 	$(LD) $(OBJFILES) $(SELECTOR_OBJ) lotr.o $(LIBRARIES) -o lotr
@@ -82,9 +86,11 @@ object.o: object.c $(HEADERFILES) object_names.h object_names_ttt.h object_price
 shape.o: shape.c shapes_param.h shapes_param_ttt.h icons_ttt.h $(HEADERFILES)
 	$(CC) $(CCPARAMS) -c shape.c
 
-sound.o: sound.c sounds_cd.h $(HEADERFILES)
+sound.o: sound.c sounds_cd.h $(HEADERFILES) voc.h
 	$(CC) $(CCPARAMS) -c sound.c
 
+
+voc.o: voc.c voc.h
 
 %.o: %.c $(HEADERFILES) Makefile Makefile.config
 	$(CC) $(CCPARAMS) -c $< -o $@

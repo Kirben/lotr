@@ -31,6 +31,7 @@
 #include "midi.h"
 #include "sound.h"
 #include "utils.h"
+#include "voc.h"
 #include <SDL.h>
 #include <limits.h>
 #include <stdio.h>
@@ -52,14 +53,15 @@ static int sound_sizes[SOUND_CAPACITY];
 
 /* Both mixers accept effects on a 22,050 Hz mono PCM grid. */
 static void
-resample_effect(int index, unsigned rate_numerator, unsigned rate_denominator)
+resample_effect(int index, SampleInfo sample)
 {
-    int size = sound_sizes[index];
-    if (size <= 0)
+    if (sample.size <= 0) {
+        sound_sizes[index] = 0;
         return;
+    }
 
-    Uint64 scale = 22050u * rate_denominator;
-    Uint64 frames = ((Uint64)size * scale + rate_numerator / 2) / rate_numerator;
+    Uint64 scale = (Uint64)22050 * sample.rate_denominator;
+    Uint64 frames = ((Uint64)sample.size * scale + sample.rate_numerator / 2) / sample.rate_numerator;
     if (frames > INT_MAX) {
         fprintf(stderr, "lotr: sampled effect %d is too large\n", index);
         exit(1);
@@ -69,7 +71,7 @@ resample_effect(int index, unsigned rate_numerator, unsigned rate_denominator)
     Uint8 *pcm = lotr_malloc((int)frames);
     /* Hold each original sample until the next source sample begins. */
     for (Uint64 frame = 0; frame < frames; ++frame)
-        pcm[frame] = source[frame * rate_numerator / scale];
+        pcm[frame] = source[frame * sample.rate_numerator / scale];
 
     free(source);
     sound_data[index] = pcm;
@@ -92,7 +94,7 @@ load_archive_sounds(void)
         sound_sizes[i] = archive_data_size(archive, i);
 
         if (i < MUSIC_MAIN_INDEX && lotr_current_edition()->data_format == LOTR_DATA_STANDARD)
-            resample_effect(i, 16000, 1);
+            resample_effect(i, (SampleInfo){sound_sizes[i], 16000, 1});
 
         /* Fix tempo in midi files */
         if (sound_sizes[i] > 13
@@ -110,38 +112,6 @@ load_archive_sounds(void)
     archive_close(archive);
 }
 
-/* Some CD effects use a Creative Voice container instead of raw PCM. */
-static int
-unwrap_cd_voice(Uint8 *data, int size)
-{
-    static const char signature[] = "Creative Voice File\x1a";
-    if (size < 20 || memcmp(data, signature, 20) != 0)
-        return size;
-    if (size < 26)
-        return 0;
-
-    int pos = data[20] | (data[21] << 8);
-    if (pos < 26)
-        return 0;
-    while (pos <= size - 4 && data[pos]) {
-        int type = data[pos];
-        int length = data[pos + 1] | (data[pos + 2] << 8) | (data[pos + 3] << 16);
-        pos += 4;
-        if (length > size - pos)
-            return 0;
-        if (type == 8 && (length != 4 || data[pos + 2] || data[pos + 3]))
-            return 0;
-        if (type == 1) {
-            if (length <= 2 || data[pos + 1])
-                return 0;
-            memmove(data, data + pos + 2, length - 2);
-            return length - 2;
-        }
-        pos += length;
-    }
-    return 0;
-}
-
 static void
 load_cd_sounds(void)
 {
@@ -157,9 +127,16 @@ load_cd_sounds(void)
             exit(1);
         }
         fclose(adlfile);
-        sound_sizes[i] = unwrap_cd_voice(sound_data[i], sound_sizes[i]);
-        /* Sound Blaster time constant 0xd2 gives 1 MHz / (256 - 0xd2). */
-        resample_effect(i, 1000000, 256 - 0xd2);
+        int size = sound_sizes[i];
+        if (voc_has_signature(sound_data[i], size)) {
+            SampleInfo decoded;
+            Uint8 *pcm = voc_decode(sound_data[i], size, &decoded);
+            free(sound_data[i]);
+            sound_data[i] = pcm;
+            size = decoded.size;
+        }
+        /* The CD driver sets a fixed Sound Blaster time constant for effects. */
+        resample_effect(i, (SampleInfo){size, 1000000, 256 - 0xd2});
         if (!sound_sizes[i])
             fprintf(stderr, "lotr: unsupported or empty CD effect %s\n",
                     cd_sound_names[i]);
@@ -207,18 +184,13 @@ read_towers_sound(const char *name, const char *extension, int *size)
 static int
 load_towers_sample(int index, Uint8 *data, int size)
 {
-    if (size >= 32 && !memcmp(data, "Creative Voice File\x1a", 20)) {
-        /* Retail VOC cues are a single uncompressed mono Type 1 block. */
-        unsigned offset = data[20] | data[21] << 8;
-        if (offset > (unsigned)size - 6 || data[offset] != 1)
+    SampleInfo sample;
+    if (voc_has_signature(data, size)) {
+        Uint8 *pcm = voc_decode(data, size, &sample);
+        if (!pcm)
             return 0;
-        unsigned divisor = 256 - data[offset + 4];
-        int payload = unwrap_cd_voice(data, size);
-        if (!payload)
-            return 0;
-        sound_sizes[index] = payload;
-        sound_data[index] = data;
-        resample_effect(index, 1000000, divisor);
+        free(data);
+        data = pcm;
     } else if (size >= 8 && !memcmp(data, "\xff\xff\xff\xff", 4)) {
         /* The speaker assets store 6-bit PCM and an 8253 timer divisor. */
         unsigned length = data[4] | data[5] << 8;
@@ -227,12 +199,12 @@ load_towers_sample(int index, Uint8 *data, int size)
             return 0;
         for (unsigned i = 0; i < length; ++i)
             data[i] = (data[i + 8] & 63) * 4;
-        sound_sizes[index] = length;
-        sound_data[index] = data;
-        resample_effect(index, 1193182, divisor);
+        sample = (SampleInfo){(int)length, 1193182, divisor};
     } else {
         return 0;
     }
+    sound_data[index] = data;
+    resample_effect(index, sample);
     towers_sampled[index] = 1;
     return 1;
 }
