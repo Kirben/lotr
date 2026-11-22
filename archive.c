@@ -66,6 +66,103 @@ archive_index_matches(FILE *index, long data_size, int length_index)
     return !length_index || end == (Uint32)data_size;
 }
 
+enum {
+    STANDARD = 1 << LOTR_DATA_STANDARD,
+    CD = 1 << LOTR_DATA_ENHANCED_CD,
+    TOWERS = 1 << LOTR_DATA_TWO_TOWERS,
+    DEMO_DATA = 1 << LOTR_DATA_DEMO,
+    FULL_GAMES = STANDARD | CD | TOWERS,
+    ALL_EDITIONS = FULL_GAMES | DEMO_DATA
+};
+
+typedef struct {
+    const char *name;
+    const char *index_name;
+    unsigned editions;
+    int min_entries;
+    int exact_entries;
+    int length_index;
+    int map_bank;
+} ArchiveRequirement;
+
+static const ArchiveRequirement archive_requirements[] = {
+    {"arts",     "arts.ndx",     FULL_GAMES},
+    {"arts",     "arts.ndx",     DEMO_DATA, 16, 1},
+    {"map0",     "map0.ndx",     FULL_GAMES, 16, 0, 0, 1},
+    {"map1",     "map1.ndx",     STANDARD | CD, 96, 0, 0, 2},
+    {"map1",     "map1.ndx",     TOWERS, 112, 0, 0, 2},
+    {"demo",     "demo.ndx",     DEMO_DATA, 8, 1, 0, 1},
+    {"shapes",   "shapes.ndx",   ALL_EDITIONS, 700, 1},
+    {"portrait", "portrait.ndx", STANDARD | CD | DEMO_DATA, 46, 1},
+    {"portrait", "portrait.ndx", TOWERS, 67, 1},
+    {"nnpcs",    "npcs.ndx",     FULL_GAMES, 240, 1},
+    {"npcs",     "npcs.ndx",     DEMO_DATA, 240, 1},
+    {"snd",      "snd.ndx",      STANDARD},
+    {"snd",      "snd.ndx",      DEMO_DATA, 27, 1},
+    {"opening",  "opening.idx", STANDARD | TOWERS, 0, 0, 1},
+    {"democrt0", "democrt0.idx", DEMO_DATA, 0, 0, 1},
+    {"democrt1", "democrt1.idx", DEMO_DATA, 0, 0, 1},
+    {"democrt2", "democrt2.idx", DEMO_DATA, 0, 0, 1},
+    {"building", "building.ndx", TOWERS},
+    {"buildpal", "buildpal.ndx", TOWERS},
+    {"icon",     "icon.ndx",     TOWERS}
+};
+
+static int
+validate_requirement(const ArchiveRequirement *rule, char *message, size_t capacity)
+{
+    char data[32];
+    snprintf(data, sizeof(data), "%s.dat", rule->name);
+    long data_size = lotr_asset_size(data, 0);
+    FILE *index = lotr_try_open_asset(rule->index_name, 0);
+    if (data_size <= 0 || !index) {
+        snprintf(message, capacity, "Game data folder needs %s.", data_size <= 0 ? data : rule->index_name);
+        if (index)
+            fclose(index);
+        return 0;
+    }
+    int width = rule->length_index ? 2 : 4;
+    long entries = lotr_filelen(index) / width;
+    int valid = entries >= rule->min_entries &&
+        (!rule->exact_entries || entries == rule->min_entries) &&
+        archive_index_matches(index, data_size, rule->length_index);
+    fclose(index);
+    if (!valid)
+        snprintf(message, capacity, "Invalid archive pair for this edition: %s and %s.", data, rule->index_name);
+    return valid;
+}
+
+int
+archive_validate_edition(char *message, size_t capacity)
+{
+    unsigned edition = 1u << lotr_current_edition()->data_format;
+    for (size_t i = 0; i < sizeof(archive_requirements) / sizeof(archive_requirements[0]); ++i) {
+        const ArchiveRequirement *rule = &archive_requirements[i];
+        if ((rule->editions & edition) && !validate_requirement(rule, message, capacity))
+            return 0;
+    }
+    return 1;
+}
+
+Archive *
+archive_open_map(int resource)
+{
+    unsigned edition = 1u << lotr_current_edition()->data_format;
+    int bank = (resource >> 8) + 1;
+    for (size_t i = 0; i < sizeof(archive_requirements) / sizeof(archive_requirements[0]); ++i) {
+        const ArchiveRequirement *rule = &archive_requirements[i];
+        if ((rule->editions & edition) && rule->map_bank == bank) {
+            char message[128];
+            if (validate_requirement(rule, message, sizeof(message)))
+                return archive_ndx_open(rule->name);
+            fprintf(stderr, "lotr: %s\n", message);
+            exit(1);
+        }
+    }
+    fprintf(stderr, "lotr: no map archive for resource %x.\n", resource);
+    exit(1);
+}
+
 /*
   opens idx'ed archive file
 */

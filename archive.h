@@ -49,6 +49,12 @@ extern Archive *archive_idx_open(const char *name);
 /* opens ndx'ed archive file */
 extern Archive *archive_ndx_open(const char *name);
 
+/* Open the map archive for a packed map resource in the active edition. */
+extern Archive *archive_open_map(int resource);
+
+/* Validate the required archive pairs for the active edition. */
+extern int archive_validate_edition(char *message, size_t capacity);
+
 /* Check archive index structure without starting the game. */
 extern int archive_index_matches(FILE *index, long data_size, int length_index);
 

@@ -314,51 +314,12 @@ draw_selector(Selector *selector)
     SDL_RenderPresent(renderer);
 }
 
-static int
-validate_archive(Selector *selector, const char *data, const char *index, int length_index)
-{
-    FILE *file = lotr_try_open_asset(index, 0);
-    long size = lotr_asset_size(data, 0);
-    int valid = file && archive_index_matches(file, size, length_index);
-    if (file)
-        fclose(file);
-    if (!valid)
-        snprintf(selector->status, sizeof(selector->status),
-                 "Invalid archive pair: %s and %s.", data, index);
-    return valid;
-}
-
 static void
 validate_paths(Selector *selector)
 {
-    static const char *const demo_pairs[][2] = {
-        {"arts.dat", "arts.ndx"}, {"demo.dat", "demo.ndx"}, {"shapes.dat", "shapes.ndx"},
-        {"portrait.dat", "portrait.ndx"}, {"npcs.dat", "npcs.ndx"}, {"snd.dat", "snd.ndx"},
-        {"democrt0.dat", "democrt0.idx"}, {"democrt1.dat", "democrt1.idx"},
-        {"democrt2.dat", "democrt2.idx"}
-    };
-    static const char *const common_pairs[][2] = {
-        {"arts.dat", "arts.ndx"}, {"map0.dat", "map0.ndx"},
-        {"map1.dat", "map1.ndx"}, {"shapes.dat", "shapes.ndx"},
-        {"portrait.dat", "portrait.ndx"}, {"nnpcs.dat", "npcs.ndx"}
-    };
-    static const char *const towers_pairs[][2] = {
-        {"building.dat", "building.ndx"}, {"buildpal.dat", "buildpal.ndx"},
-        {"icon.dat", "icon.ndx"}
-    };
-    static const char *const common[] = {
-        "arts.dat", "arts.ndx", "arts.pal", "map0.dat", "map0.ndx", "map1.dat",
-        "map1.ndx", "shapes.dat", "shapes.ndx", "shapes.pal", "portrait.dat",
-        "portrait.ndx", "nnpcs.dat", "npcs.ndx"
-    };
-    static const char *const standard[] = {"snd.dat", "snd.ndx", "opening.dat", "opening.idx"};
-    static const char *const cd[] = {"magics.adl", "vid.dat", "vid.pal"};
-    static const char *const towers[] = {
-        "building.dat", "building.ndx", "buildpal.dat", "buildpal.ndx", "icon.dat",
-        "icon.ndx", "opening.dat", "opening.idx", "ongame.dat", "ongame.pal"
-    };
-    const char *const *files = standard;
-    size_t count = SDL_arraysize(standard);
+    static const char *const palettes[] = {"arts.pal", "shapes.pal"};
+    static const char *const cd_files[] = {"magics.adl", "vid.dat", "vid.pal"};
+    static const char *const towers_files[] = {"ongame.dat", "ongame.pal"};
     EditionPaths *paths = &edition_paths[selector->selected];
     selector->ready = 0;
     if (!paths->data[0]) {
@@ -368,61 +329,24 @@ validate_paths(Selector *selector)
     const char *movies = enhanced_cd(selector) && paths->movies[0] ? paths->movies : NULL;
     if (!lotr_configure_edition(lotr_edition_at(selector->selected)->key, paths->data, movies))
         return;
-    if (selector->selected == LOTR_DATA_DEMO) {
-        for (size_t i = 0; i < SDL_arraysize(demo_pairs); ++i)
-            if (!validate_archive(selector, demo_pairs[i][0], demo_pairs[i][1],
-                                  strstr(demo_pairs[i][1], ".idx") != NULL))
-                return;
-        if (lotr_asset_size("arts.pal", 0) <= 0 || lotr_asset_size("shapes.pal", 0) <= 0 ||
-            lotr_asset_size("arts.ndx", 0) != 64 || lotr_asset_size("demo.ndx", 0) != 32 ||
-            lotr_asset_size("snd.ndx", 0) != 108 || lotr_asset_size("npcs.ndx", 0) != 960 ||
-            lotr_asset_size("portrait.ndx", 0) != 184 || lotr_asset_size("shapes.ndx", 0) != 2800) {
-            SDL_strlcpy(selector->status, "The archives or palettes do not match the Fellowship demo.",
-                        sizeof(selector->status));
-            return;
-        }
-        goto ready;
-    }
-    for (size_t i = 0; i < SDL_arraysize(common); ++i) {
-        if (lotr_asset_size(common[i], 0) <= 0) {
-            snprintf(selector->status, sizeof(selector->status), "Game data folder needs %s.", common[i]);
-            return;
-        }
-    }
-    int is_towers = selector->selected == LOTR_DATA_TWO_TOWERS;
-    if (lotr_asset_size("portrait.ndx", 0) != (is_towers ? 268 : 184) ||
-        lotr_asset_size("npcs.ndx", 0) != 960 || lotr_asset_size("shapes.ndx", 0) != 2800 ||
-        lotr_asset_size("map0.ndx", 0) < 16 * 4 ||
-        lotr_asset_size("map1.ndx", 0) < (is_towers ? 112 : 96) * 4) {
-        SDL_strlcpy(selector->status, "The archive indexes do not match the selected edition.",
-                    sizeof(selector->status));
+    if (!archive_validate_edition(selector->status, sizeof(selector->status)))
         return;
-    }
+    const char *const *extra = NULL;
+    size_t count = 0;
     if (enhanced_cd(selector)) {
-        files = cd;
-        count = SDL_arraysize(cd);
-    } else if (is_towers) {
-        files = towers;
-        count = SDL_arraysize(towers);
+        extra = cd_files;
+        count = SDL_arraysize(cd_files);
+    } else if (selector->selected == LOTR_DATA_TWO_TOWERS) {
+        extra = towers_files;
+        count = SDL_arraysize(towers_files);
     }
-    for (size_t i = 0; i < count; ++i) {
-        if (lotr_asset_size(files[i], 0) <= 0) {
-            snprintf(selector->status, sizeof(selector->status),
-                     "%s is required for this edition. Check the game data folder.", files[i]);
+    for (size_t i = 0; i < SDL_arraysize(palettes) + count; ++i) {
+        const char *file = i < SDL_arraysize(palettes) ? palettes[i] : extra[i - SDL_arraysize(palettes)];
+        if (lotr_asset_size(file, 0) <= 0) {
+            snprintf(selector->status, sizeof(selector->status), "Game data folder needs %s.", file);
             return;
         }
     }
-    for (size_t i = 0; i < SDL_arraysize(common_pairs); ++i)
-        if (!validate_archive(selector, common_pairs[i][0], common_pairs[i][1], 0))
-            return;
-    if (!is_towers && !enhanced_cd(selector) && !validate_archive(selector, "snd.dat", "snd.ndx", 0))
-        return;
-    if (!enhanced_cd(selector) && !validate_archive(selector, "opening.dat", "opening.idx", 1))
-        return;
-    if (is_towers)
-        for (size_t i = 0; i < SDL_arraysize(towers_pairs); ++i)
-            if (!validate_archive(selector, towers_pairs[i][0], towers_pairs[i][1], 0))
-                return;
     if (enhanced_cd(selector)) {
         for (int i = 0; av_name(i); ++i) {
             char name[24];
@@ -433,7 +357,6 @@ validate_paths(Selector *selector)
             }
         }
     }
-ready:
     selector->ready = 1;
     SDL_strlcpy(selector->status, "Game data found. Ready to play.", sizeof(selector->status));
 }

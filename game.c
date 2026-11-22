@@ -201,14 +201,6 @@ game_parse_texts(Archive *archive, int index)
   loads a map
 */
 
-static Archive *
-game_open_map_archive(LotrDataFormat format, int resource)
-{
-    if (format == LOTR_DATA_DEMO)
-        return archive_ndx_open("demo");
-    return archive_ndx_open(resource > 0xff ? "map1" : "map0");
-}
-
 void
 game_load_map(int map)
 {
@@ -236,7 +228,7 @@ game_load_map(int map)
     lotr_reset_keyboard();
 
     if (game_maps[map][0] != loaded_map_desc) {
-        archive = game_open_map_archive(format, game_maps[map][0]);
+        archive = archive_open_map(game_maps[map][0]);
         map_set_map(archive, map, game_maps[map][0] % 0x100);
         archive_close(archive);
         loaded_map_desc = game_maps[map][0];
@@ -244,7 +236,7 @@ game_load_map(int map)
 
 
     if (game_maps[map][1] != loaded_map_spots) {
-        archive = game_open_map_archive(format, game_maps[map][1]);
+        archive = archive_open_map(game_maps[map][1]);
 
         game_parse_texts(archive, game_maps[map][1] % 0x100 + 1);
 
@@ -266,7 +258,7 @@ game_load_map(int map)
     game_map_id = map;
 
     if (game_maps[map][2] != loaded_map_graphics) {
-        archive = game_open_map_archive(format, game_maps[map][2]);
+        archive = archive_open_map(game_maps[map][2]);
         map_set_tiles(archive, game_maps[map][2] % 0x100,
                       game_maps[map][2] % 0x100 + 1,
                       game_maps[map][2] % 0x100 + 2,
