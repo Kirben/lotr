@@ -1,7 +1,7 @@
 #ifndef LOTR_SELECTOR_ART_H
 #define LOTR_SELECTOR_ART_H
 
-/* Built-in bitmap lettering and artwork for the startup screen. */
+/* Built-in bitmap lettering for the edition selector. */
 static const unsigned char selector_font[128][5] = {
     ['!']={0,0,95,0,0}, ['"']={0,7,0,7,0}, ['#']={20,127,20,127,20},
     ['$']={36,42,127,42,18}, ['%']={35,19,8,100,98}, ['&']={54,73,85,34,80},
@@ -36,50 +36,5 @@ static const unsigned char selector_font[128][5] = {
     ['y']={12,80,80,80,60}, ['z']={68,100,84,76,68}, ['{']={0,8,54,65,0},
     ['|']={0,0,127,0,0}, ['}']={0,65,54,8,0}, ['~']={8,4,8,16,8}
 };
-
-static int
-selector_ridge(int x, const int peaks[], int step)
-{
-    int section = x / step;
-    int weight = x % step;
-    return (peaks[section] * (step - weight) + peaks[section + 1] * weight) / step;
-}
-
-static SDL_Texture *
-selector_title_art(SDL_Renderer *renderer)
-{
-    enum { WIDTH = 448, HEIGHT = 88 };
-    static const int distant[] = {64, 49, 57, 44, 58, 49, 32, 48, 53, 38, 47, 28, 49, 31, 55};
-    static const int near_peaks[] = {76, 72, 78, 65, 73, 69, 63, 71, 54, 69, 46, 60, 53, 70, 60};
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, WIDTH, HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!surface)
-        return NULL;
-    for (int y = 0; y < HEIGHT; ++y) {
-        Uint32 *pixels = (Uint32 *)((Uint8 *)surface->pixels + y * surface->pitch);
-        for (int x = 0; x < WIDTH; ++x) {
-            int grain = (x * 11 + y * 23 + (x ^ y)) % 5;
-            int fade = x / 12;
-            Uint32 color = 0xff000000u | (Uint32)(15 + fade + y / 5 + grain) << 16 |
-                (Uint32)(23 + fade / 2 + y / 8) << 8 | (Uint32)(33 + fade / 4);
-            if (x > 150 && y >= selector_ridge(x, distant, 32) + grain / 2)
-                color = 0xff384047u - (Uint32)(grain * 0x010101);
-            if (x > 110 && y >= selector_ridge(x, near_peaks, 32) + grain / 2)
-                color = 0xff232e34u + (Uint32)(grain * 0x010101);
-            if (y > 79 + (x / 13) % 5)
-                color = 0xff182225u;
-            int dx = x - 356, dy = y - 35;
-            int across = dx + dy;
-            int up = dy * 3 - dx;
-            int edge = across * across * 2 + up * up * 3;
-            if (edge > 6050 && edge < 9400)
-                color = edge < 7100 ? 0xff9d6034u :
-                    (dy < 0 ? 0xffffd58bu : 0xffd29251u);
-            pixels[x] = color;
-        }
-    }
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
-    return texture;
-}
 
 #endif

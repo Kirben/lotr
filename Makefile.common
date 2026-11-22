@@ -65,7 +65,7 @@ lotr: $(OBJFILES) $(SELECTOR_OBJ) lotr.o
 lotr.static: $(OBJFILES) $(SELECTOR_OBJ) lotr.o
 	$(LD_STATIC) $(OBJFILES) $(SELECTOR_OBJ) lotr.o $(STATIC_LIBRARIES) -o lotr.static
 
-selector.o: selector.h selector_art.h selector_files.h
+selector.o: selector.h selector_art.h selector_files.h roland.h sound.h
 lotr.o: selector.h
 
 

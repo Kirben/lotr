@@ -119,7 +119,7 @@ static int moved_paths(const char *parent, const char *settings)
 
     Selector selector = {.selected = LOTR_DATA_TWO_TOWERS};
     type_path(&selector, old);
-    if (!check(selector.ready && click(&selector, play_rect) == 1,
+    if (!check(selector.ready && click(&selector, launch_rect) == 1,
                "original Windows drive-letter data path plays"))
         return 0;
     selector_write_settings(settings, edition_paths, selector.selected);
@@ -134,7 +134,7 @@ static int moved_paths(const char *parent, const char *settings)
     select_card(&selector, selector.selected);
     if (!check(selector.selected == LOTR_DATA_TWO_TOWERS &&
                strcmp(edition_paths[selector.selected].data, old) == 0 &&
-               !selector.ready && click(&selector, play_rect) != 1,
+               !selector.ready && click(&selector, launch_rect) != 1,
                "stale saved Windows path blocks Play"))
         return 0;
 
@@ -146,7 +146,7 @@ static int moved_paths(const char *parent, const char *settings)
     if (ok) {
         key(&selector, SDLK_RETURN, 0);
         key(&selector, SDLK_u, 0);
-        ok = check(selector.ready && click(&selector, play_rect) == 1 &&
+        ok = check(selector.ready && click(&selector, launch_rect) == 1 &&
                    SDL_strcasecmp(edition_paths[selector.selected].data, normalized) == 0,
                    "browse selection validates and enables Play");
     }
@@ -162,8 +162,8 @@ static int moved_paths(const char *parent, const char *settings)
     FILE *asset = lotr_try_open_asset("arts.dat", 0);
     ok = check(selector.selected == LOTR_DATA_TWO_TOWERS && selector.ready && asset &&
                SDL_strcasecmp(edition_paths[selector.selected].data, normalized) == 0 &&
-               click(&selector, play_rect) == 1,
-               "Unicode XML settings round-trip and native asset open");
+               click(&selector, launch_rect) == 1,
+               "Unicode CFG settings round-trip and native asset open");
     if (asset)
         fclose(asset);
     return ok;
@@ -179,7 +179,7 @@ static int play_first_frame(const char *edition, const char *settings)
             return 0;
         selector_write_settings(settings, edition_paths, profile);
     }
-    const char *suffix = "selector.xml";
+    const char *suffix = "selector.cfg";
     size_t length = strlen(settings);
     if (!check(length > strlen(suffix) && !strcmp(settings + length - strlen(suffix), suffix),
                "test preferences filename has the expected suffix"))

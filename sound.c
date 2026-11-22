@@ -312,8 +312,8 @@ play_cue(SoundSource source, int index, const char *filename, int loop)
     if (source == SOUND_PCM) {
         play_sample(sound_data[index], sound_sizes[index], LOTR_PCM_U8);
     } else {
-        if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS &&
-            (music_muted || !sound_data[index]))
+        if (music_muted || (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS &&
+                            !sound_data[index]))
             return 0;
         int fade_in = index == 0 && lotr_current_edition()->audio == LOTR_AUDIO_TOWERS;
         play_midi(sound_data[index], sound_sizes[index], loop, fade_in);
@@ -383,12 +383,16 @@ play_music(void)
 */
 
 void
+sound_set_music_enabled(int enabled)
+{
+    music_muted = !enabled;
+}
+
+void
 toggle_music(void)
 {
     int was_playing = stop_midi();
-    LotrAudio audio = lotr_current_edition()->audio;
-    if (audio == LOTR_AUDIO_CD || audio == LOTR_AUDIO_TOWERS)
-        music_muted = was_playing;
+    music_muted = was_playing;
     if (!was_playing)
         play_music();
 }

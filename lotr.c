@@ -78,8 +78,10 @@ main(int argc, char *argv[])
     const char *edition = NULL;
     const char *data_dir = NULL;
     const char *movie_dir = NULL;
-#ifdef LOTR_ROLAND_OUTPUT
+#if defined(LOTR_ROLAND_OUTPUT) || defined(LOTR_SDL2_SELECTOR)
     const char *roland_port = NULL, *roland_profile = NULL;
+#endif
+#ifdef LOTR_ROLAND_OUTPUT
     if (argc == 2 && !strcmp(argv[1], "--list-midi-ports"))
         return roland_list_ports();
 #endif
@@ -123,7 +125,10 @@ main(int argc, char *argv[])
         return 1;
 
 
-#ifdef LOTR_ROLAND_OUTPUT
+#ifdef LOTR_SDL2_SELECTOR
+    if (!lotr_apply_edition_preferences(roland_port, roland_profile))
+        return 1;
+#elif defined(LOTR_ROLAND_OUTPUT)
     int fellowship = lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE;
     if (fellowship || lotr_current_edition()->audio == LOTR_AUDIO_TOWERS) {
         if (!roland_configure(roland_port, roland_profile, fellowship))

@@ -12,6 +12,9 @@
 typedef struct {
     char data[LOTR_PATH_CAPACITY];
     char movies[LOTR_PATH_CAPACITY];
+    int music_off;
+    char profile[16];
+    char port[32];
 } EditionPaths;
 
 typedef struct {
@@ -22,6 +25,13 @@ typedef struct {
     int first;
     int open;
     int movies;
+#ifdef WIN32
+    char drives[26];
+    int drive_count;
+    int drive_selected;
+    int drive_first;
+    int drive_open;
+#endif
 } DirectoryBrowser;
 
 static int
@@ -33,14 +43,14 @@ selector_join(char *result, size_t capacity, const char *directory, const char *
     return written >= 0 && (size_t)written < capacity;
 }
 
-static void
-selector_read_settings(const char *path, EditionPaths paths[], int *selected)
+static int
+selector_read_legacy_settings(const char *path, EditionPaths paths[], int *selected)
 {
     if (!path)
-        return;
+        return 0;
     xmlDocPtr doc = xmlReadFile(path, NULL, XML_PARSE_NONET | XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
     if (!doc)
-        return;
+        return 0;
     xmlNodePtr root = xmlDocGetRootElement(doc);
     if (root && xmlStrEqual(root->name, BAD_CAST "wonderland")) {
         xmlChar *last = xmlGetProp(root, BAD_CAST "selected");
@@ -65,6 +75,7 @@ selector_read_settings(const char *path, EditionPaths paths[], int *selected)
         xmlFree(last);
     }
     xmlFreeDoc(doc);
+    return 1;
 }
 
 #ifdef WIN32
@@ -92,12 +103,74 @@ selector_replace_file(const char *temporary, const char *path)
 #endif
 }
 
-static void
-selector_write_settings(const char *path, EditionPaths paths[], int selected)
+static FILE *
+selector_open_settings(const char *path, int writing)
+{
+#ifdef WIN32
+    wchar_t wide[LOTR_PATH_CAPACITY];
+    return selector_wide_path(path, wide) ? _wfopen(wide, writing ? L"wb" : L"rb") : NULL;
+#else
+    return fopen(path, writing ? "wb" : "rb");
+#endif
+}
+
+static int
+selector_read_settings(const char *path, EditionPaths paths[], int *selected)
+{
+    FILE *file = path ? selector_open_settings(path, 0) : NULL;
+    if (!file)
+        return 0;
+    char line[LOTR_PATH_CAPACITY + 32];
+    while (fgets(line, sizeof(line), file)) {
+        size_t end = strcspn(line, "\r\n");
+        if (!line[end] && !feof(file)) {
+            int c;
+            while ((c = fgetc(file)) != '\n' && c != EOF)
+                ;
+            continue;
+        }
+        line[end] = 0;
+        char *value = strchr(line, '=');
+        if (!value)
+            continue;
+        *value++ = 0;
+        if (!strcmp(line, "selected")) {
+            for (int i = 0; i < LOTR_DATA_COUNT; ++i)
+                if (!strcmp(value, lotr_edition_at(i)->key))
+                    *selected = i;
+            continue;
+        }
+        char *key = strchr(line, '.');
+        if (!key)
+            continue;
+        *key++ = 0;
+        for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
+            if (strcmp(line, lotr_edition_at(i)->key))
+                continue;
+            EditionPaths *entry = &paths[i];
+            if (!strcmp(key, "data") && strlen(value) < sizeof(entry->data))
+                SDL_strlcpy(entry->data, value, sizeof(entry->data));
+            else if (!strcmp(key, "movies") && strlen(value) < sizeof(entry->movies))
+                SDL_strlcpy(entry->movies, value, sizeof(entry->movies));
+            else if (!strcmp(key, "music"))
+                entry->music_off = !strcmp(value, "off");
+            else if (!strcmp(key, "roland") &&
+                     (!strcmp(value, "off") || !strcmp(value, "lapc-i") || !strcmp(value, "mt-32")))
+                SDL_strlcpy(entry->profile, value, sizeof(entry->profile));
+            else if (!strcmp(key, "port") && strlen(value) < sizeof(entry->port))
+                SDL_strlcpy(entry->port, value, sizeof(entry->port));
+        }
+    }
+    fclose(file);
+    return 1;
+}
+
+static int
+selector_write_settings(const char *path, const EditionPaths paths[], int selected)
 {
     char temporary[LOTR_PATH_CAPACITY];
     if (!path)
-        return;
+        return 0;
 #ifdef WIN32
     unsigned long process = GetCurrentProcessId();
 #else
@@ -105,27 +178,33 @@ selector_write_settings(const char *path, EditionPaths paths[], int selected)
 #endif
     int length = snprintf(temporary, sizeof(temporary), "%s.%lu.tmp", path, process);
     if (length < 0 || (size_t)length >= sizeof(temporary))
-        return;
-    xmlDocPtr doc = xmlNewDoc(BAD_CAST "1.0");
-    if (!doc)
-        return;
-    xmlNodePtr root = xmlNewNode(NULL, BAD_CAST "wonderland");
-    if (root) {
-        xmlDocSetRootElement(doc, root);
-        xmlNewProp(root, BAD_CAST "selected", BAD_CAST lotr_edition_at(selected)->key);
-        for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
-            xmlNodePtr entry = xmlNewChild(root, NULL, BAD_CAST lotr_edition_at(i)->key, NULL);
-            if (!entry)
-                continue;
-            xmlNewProp(entry, BAD_CAST "data", BAD_CAST paths[i].data);
-            if (i == LOTR_DATA_ENHANCED_CD)
-                xmlNewProp(entry, BAD_CAST "movies", BAD_CAST paths[i].movies);
-        }
-        if (xmlSaveFormatFileEnc(temporary, doc, "UTF-8", 1) < 0 ||
-            !selector_replace_file(temporary, path))
-            fprintf(stderr, "lotr: could not save selector settings in %s\n", path);
+        return 0;
+    FILE *file = selector_open_settings(temporary, 1);
+    if (!file)
+        return 0;
+    fprintf(file, "selected=%s\n", lotr_edition_at(selected)->key);
+    for (int i = 0; i < LOTR_DATA_COUNT; ++i) {
+        const char *key = lotr_edition_at(i)->key;
+        fprintf(file, "%s.data=%s\n%s.music=%s\n", key, paths[i].data,
+                key, paths[i].music_off ? "off" : "on");
+        if (i == LOTR_DATA_ENHANCED_CD)
+            fprintf(file, "%s.movies=%s\n", key, paths[i].movies);
+        if (i == LOTR_DATA_STANDARD || i == LOTR_DATA_TWO_TOWERS)
+            fprintf(file, "%s.roland=%s\n%s.port=%s\n", key, paths[i].profile, key, paths[i].port);
     }
-    xmlFreeDoc(doc);
+    int ok = !ferror(file);
+    if (fclose(file))
+        ok = 0;
+    if (ok && selector_replace_file(temporary, path))
+        return 1;
+#ifdef WIN32
+    wchar_t wide[LOTR_PATH_CAPACITY];
+    if (selector_wide_path(temporary, wide))
+        _wremove(wide);
+#else
+    remove(temporary);
+#endif
+    return 0;
 }
 
 static void

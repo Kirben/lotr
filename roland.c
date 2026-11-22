@@ -24,6 +24,22 @@ report_midi_error(MMRESULT error)
         fprintf(stderr, "lotr: Roland MIDI error %u\n", (unsigned)error);
 }
 
+unsigned
+roland_port_count(void)
+{
+    return midiOutGetNumDevs();
+}
+
+int
+roland_port_name(unsigned index, char name[32])
+{
+    MIDIOUTCAPSA caps;
+    if (midiOutGetDevCapsA(index, &caps, sizeof(caps)) != MMSYSERR_NOERROR)
+        return 0;
+    SDL_strlcpy(name, caps.szPname, 32);
+    return 1;
+}
+
 int
 roland_list_ports(void)
 {
@@ -58,79 +74,35 @@ find_port(const char *name)
 }
 
 int
-roland_configure(const char *port, const char *profile, int fellowship)
+roland_activate(const char *name, const char *mode, int fellowship, int strict)
 {
-    const char *filename = fellowship ? "fellowship-midi.cfg" : "two-towers-midi.cfg";
-    char saved_profile[16] = "off";
-    char saved_port[MAXPNAMELEN] = "";
-    char *directory = SDL_GetPrefPath("lotr", "lotr");
-    if (!directory) {
-        if (port || profile)
-            fprintf(stderr, "lotr: cannot locate MIDI preferences: %s\n", SDL_GetError());
-        return !port && !profile;
-    }
-    size_t length = strlen(directory) + strlen(filename) + 1;
-    char *path = SDL_malloc(length);
-    if (!path) {
-        SDL_free(directory);
+    selected_port = UINT_MAX;
+    if (strlen(name) >= 32 || strpbrk(name, "\r\n")) {
+        fputs("lotr: invalid MIDI output name. Use --list-midi-ports.\n", stderr);
         return 0;
     }
-    snprintf(path, length, "%s%s", directory, filename);
-    SDL_free(directory);
+    if (!strcmp(mode, "off"))
+        return 1;
+    if (strcmp(mode, "lapc-i") && strcmp(mode, "mt-32")) {
+        fputs("lotr: Roland profile must be lapc-i, mt-32 or off.\n", stderr);
+        return 0;
+    }
+    selected_port = find_port(name);
+    if (selected_port == UINT_MAX) {
+        fprintf(stderr, "lotr: MIDI output '%s' unavailable. Use --list-midi-ports.\n", name);
+        return !strict;
+    }
+    fprintf(stderr, "lotr: Roland MIDI %s -> %s\n", mode, name);
+    if (!fellowship && !strcmp(mode, "mt-32"))
+        fputs("lotr: The Two Towers score uses LAPC-I features.\n", stderr);
+    return 1;
+}
 
-    FILE *file = fopen(path, "r");
-    if (file) {
-        if (fscanf(file, "%15[^\n]\n%31[^\n]", saved_profile, saved_port) < 1)
-            strcpy(saved_profile, "off");
-        fclose(file);
-    }
-
-    const char *mode = profile ? profile : port && !strcmp(saved_profile, "off")
-                                         ? "lapc-i" : saved_profile;
-    const char *name = port ? port : saved_port;
-    int ok = 0;
-    if (port && (strlen(port) >= sizeof(saved_port) || strpbrk(port, "\r\n"))) {
-        fputs("lotr: invalid MIDI output name. Use --list-midi-ports.\n", stderr);
-        goto done;
-    }
-    if (strcmp(mode, "off")) {
-        if (strcmp(mode, "lapc-i") && strcmp(mode, "mt-32")) {
-            fprintf(stderr, "lotr: Roland profile must be lapc-i, mt-32 or off\n");
-            goto done;
-        }
-        selected_port = find_port(name);
-        if (selected_port == UINT_MAX) {
-            fprintf(stderr, "lotr: MIDI output '%s' unavailable. Use --list-midi-ports.\n", name);
-            if (!port && !profile) {
-                fputs("lotr: using the default music backend for this run.\n", stderr);
-                ok = 1;
-            }
-            goto done;
-        }
-    }
-
-    if (port || profile) {
-        file = fopen(path, "w");
-        if (!file) {
-            perror(path);
-            goto done;
-        }
-        int written = fprintf(file, "%s\n%s\n", mode, name);
-        if (fclose(file) || written < 0) {
-            perror(path);
-            goto done;
-        }
-    }
-    if (selected_port != UINT_MAX) {
-        fprintf(stderr, "lotr: Roland MIDI %s -> %s\n", mode, name);
-        if (!fellowship && !strcmp(mode, "mt-32"))
-            fputs("lotr: The Two Towers score uses LAPC-I features.\n", stderr);
-    }
-    ok = 1;
-
-done:
-    SDL_free(path);
-    return ok;
+int
+roland_configure(const char *port, const char *profile, int fellowship)
+{
+    return roland_activate(port ? port : "", profile ? profile : port ? "lapc-i" : "off",
+                           fellowship, port || profile);
 }
 
 int

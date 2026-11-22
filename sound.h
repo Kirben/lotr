@@ -59,6 +59,7 @@ extern void music_combat_won(void);
 
 /* starts stop playing the music track */
 extern void toggle_music(void);
+extern void sound_set_music_enabled(int enabled);
 
 
 
