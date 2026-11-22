@@ -211,6 +211,109 @@ spot_command(int opcode, LotrDataFormat format)
     }
 }
 
+typedef struct {
+    Uint8 size;
+    Uint8 towers_size;
+} SpotOpcodeWidth;
+
+/* Sizes include the opcode byte. A zero size leaves decoding to the
+   variable-length command handler. */
+static const SpotOpcodeWidth opcode_widths[COMMAND_CONFINE_COMBAT + 1] = {
+    [COMMAND_02] = {5},
+    [COMMAND_43] = {8},
+    [COMMAND_47] = {1},
+    [COMMAND_CAN_MOVE] = {1},
+    [COMMAND_CAN_NOT_MOVE] = {1},
+    [COMMAND_CARTOON] = {2},
+    [COMMAND_COMBAT] = {1},
+    [COMMAND_CONFINE_COMBAT] = {1},
+    [COMMAND_DIE] = {1},
+    [COMMAND_DISABLE_SPOT] = {2},
+    [COMMAND_DISMISS_TMP_LEADER] = {1},
+    [COMMAND_ELSE] = {1},
+    [COMMAND_END] = {1},
+    [COMMAND_END_OF_GAME] = {1},
+    [COMMAND_ENDIF] = {1},
+    [COMMAND_EXIT_BUILDING] = {1},
+    [COMMAND_FALSE_THEN] = {1},
+    [COMMAND_GAME_REG_OFF] = {2},
+    [COMMAND_GAME_REG_ON] = {2},
+    [COMMAND_GET_WHEN_EMPTY] = {1},
+    [COMMAND_GOTO] = {3},
+    [COMMAND_IF_DAY] = {1},
+    [COMMAND_IF_GAME_REG] = {2},
+    [COMMAND_IF_MAP_DARK] = {1},
+    [COMMAND_IF_OBJECTS_AT_LEAST] = {4},
+    [COMMAND_IF_OBJECTS_HERE] = {4},
+    [COMMAND_IF_PARTY] = {5},
+    [COMMAND_IF_PARTY_ACTIVE] = {2},
+    [COMMAND_IF_RANDOM] = {2},
+    [COMMAND_IF_REGISTER] = {2},
+    [COMMAND_LOAD_POSITION] = {1},
+    [COMMAND_MAP_DARK] = {1},
+    [COMMAND_MAP_FOG] = {2},
+    [COMMAND_MAP_LIGHT] = {1},
+    [COMMAND_MAP_NORMAL] = {1},
+    [COMMAND_NO_OPERATION] = {1},
+    [COMMAND_NPC_CHANGE_STAT] = {6},
+    [COMMAND_NPC_DELETE] = {2},
+    [COMMAND_NPC_DISMISS] = {3},
+    [COMMAND_NPC_MOVE] = {7},
+    [COMMAND_NPC_RECRUIT] = {2, 3},
+    [COMMAND_NPC_SET_FLAGS] = {4},
+    [COMMAND_NPC_TURN_TO_ME] = {2},
+    [COMMAND_OBJECT_DEC] = {2},
+    [COMMAND_OBJECT_INC] = {2},
+    [COMMAND_OBJECTS_HERE] = {3},
+    [COMMAND_PLAY_AV] = {2},
+    [COMMAND_QUESTION] = {2},
+    [COMMAND_QUESTION_PAR] = {2},
+    [COMMAND_REGISTER_OFF] = {2},
+    [COMMAND_REGISTER_ON] = {2},
+    [COMMAND_SAVE_POSITION] = {1},
+    [COMMAND_SELECT_CHARACTER] = {2},
+    [COMMAND_SET_OBJECT] = {3},
+    [COMMAND_SET_SELECTED_FIELD] = {3},
+    [COMMAND_SET_SILVER] = {3, 2},
+    [COMMAND_SET_TIMER] = {3},
+    [COMMAND_SET_TMP_LEADER] = {2},
+    [COMMAND_SKILLS_HERE] = {3},
+    [COMMAND_SOUND] = {2},
+    [COMMAND_TELEPORT] = {9},
+    [COMMAND_TEXT] = {2},
+    [COMMAND_TEXT_PAR] = {2},
+    [COMMAND_TRUE_THEN] = {1},
+    [COMMAND_UNKNOWN1] = {1},
+    [COMMAND_UNKNOWN42] = {1},
+    [COMMAND_UNKNOWN6] = {3},
+    [COMMAND_UNKNOWN7] = {1},
+    [COMMAND_UNKNOWN9] = {6},
+    [COMMAND_UNKNOWNc] = {2},
+    [COMMAND_UNKNOWNd] = {2},
+    [COMMAND_UNKNOWNe] = {1},
+    [COMMAND_UNKNOWNf] = {1},
+    [COMMAND_UNKNOWNg] = {2},
+    [COMMAND_UNKNOWNi] = {1},
+    [COMMAND_UNKNOWNm] = {5},
+    [COMMAND_UNKNOWNn] = {1},
+    [COMMAND_WAIT_TICKS] = {3},
+};
+
+typedef struct {
+    int command;
+    int size;
+} SpotOpcode;
+
+static SpotOpcode
+spot_decode_opcode(Uint8 opcode, LotrDataFormat format)
+{
+    SpotOpcode decoded = {.command = spot_command(opcode, format)};
+    const SpotOpcodeWidth *width = &opcode_widths[decoded.command];
+    decoded.size = format == LOTR_DATA_TWO_TOWERS && width->towers_size ?
+        width->towers_size : width->size;
+    return decoded;
+}
+
 Uint8 *spot_objects;
 Uint8 *buy_objects;
 
@@ -381,7 +484,8 @@ new_parsing:
             spot->data[i + 1] == 0x0d && spot->data[i + 2] == COMMAND_END)
             level = next_level = 0;
         spot->command_start[n] = i;
-        switch (spot_command(spot->data[i], format)) {
+        SpotOpcode opcode = spot_decode_opcode(spot->data[i], format);
+        switch (opcode.command) {
 
             case COMMAND_UNKNOWNl:
                 i = spot->data_size;
@@ -392,7 +496,7 @@ new_parsing:
                     map_get_building(spot->map, readint(spot->data + i + 1),
                                      readint(spot->data + i + 3));
                 spot->floor = spot->data[i + 7];
-                i += 8;
+                i += opcode.size;
                 break;
 
             case COMMAND_PARAGRAPH_SEQUENCE:
@@ -405,43 +509,6 @@ new_parsing:
                 i += 2 + spot->data[i + 1];
                 break;
 
-            case COMMAND_UNKNOWN9:
-                i += 6;
-                break;
-
-            case COMMAND_SELECT_CHARACTER:
-                i += 2;
-                break;
-
-            case COMMAND_SET_SELECTED_FIELD:
-                i += 3;
-                break;
-
-            case COMMAND_UNKNOWNm:
-                i += 5;
-                break;
-
-            case COMMAND_UNKNOWN6:
-            case COMMAND_WAIT_TICKS:
-                i += 3;
-                break;
-
-            case COMMAND_UNKNOWNd:
-            case COMMAND_UNKNOWNc:
-            case COMMAND_UNKNOWNg:
-                i += 2;
-                break;
-
-            case COMMAND_CONFINE_COMBAT:
-            case COMMAND_UNKNOWN1:
-            case COMMAND_UNKNOWN7:
-            case COMMAND_UNKNOWNe:
-            case COMMAND_UNKNOWNf:
-            case COMMAND_UNKNOWNi:
-            case COMMAND_UNKNOWNn:
-                i += 1;
-                break;
-
             case COMMAND_NPC_CREATE:
                 if (spot->data[i + 5])
                     i += 6 + spot->data[i + 4] * 4;
@@ -451,87 +518,14 @@ new_parsing:
                 }
                 break;
 
-            case COMMAND_TELEPORT:
-                i += 9;
-                break;
-
-            case COMMAND_NPC_MOVE:
-                i += 7;
-                break;
-
-            case COMMAND_NPC_CHANGE_STAT:
-                i += 6;
-                break;
-
-            case COMMAND_IF_PARTY:
-            case COMMAND_02:
-                i += 5;
-                break;
-
             case COMMAND_NPC_INIT:
                 i += two_towers && spot->data[i + 2] == 0 ? 5 : 4;
                 break;
 
 
-            case COMMAND_IF_OBJECTS_HERE:
-            case COMMAND_IF_OBJECTS_AT_LEAST:
-            case COMMAND_NPC_SET_FLAGS:
-                i += 4;
-                break;
-
-            case COMMAND_OBJECTS_HERE:
-            case COMMAND_SET_OBJECT:
-            case COMMAND_SKILLS_HERE:
-            case COMMAND_GOTO:
-            case COMMAND_SET_TIMER:
-            case COMMAND_NPC_DISMISS:
-                i += 3;
-                break;
-
-            case COMMAND_IF_PARTY_ACTIVE:
-                i += 2;
-                break;
-
             case COMMAND_ACTIVATE_PARTY:
                 i += 3;
                 break;
-            case COMMAND_GET_WHEN_EMPTY:
-            case COMMAND_UNKNOWN42:
-                i += 1;
-                break;
-
-            case COMMAND_SET_SILVER:
-                i += two_towers ? 2 : 3;
-                break;
-
-            case COMMAND_NPC_RECRUIT:
-                i += two_towers ? 3 : 2;
-                break;
-
-            case COMMAND_DISABLE_SPOT:
-            case COMMAND_TEXT:
-            case COMMAND_TEXT_PAR:
-            case COMMAND_QUESTION:
-            case COMMAND_QUESTION_PAR:
-            case COMMAND_IF_RANDOM:
-            case COMMAND_IF_REGISTER:
-            case COMMAND_REGISTER_OFF:
-            case COMMAND_REGISTER_ON:
-            case COMMAND_IF_GAME_REG:
-            case COMMAND_GAME_REG_OFF:
-            case COMMAND_GAME_REG_ON:
-            case COMMAND_NPC_TURN_TO_ME:
-            case COMMAND_NPC_DELETE:
-            case COMMAND_SOUND:
-            case COMMAND_CARTOON:
-            case COMMAND_PLAY_AV:
-            case COMMAND_OBJECT_INC:
-            case COMMAND_OBJECT_DEC:
-            case COMMAND_SET_TMP_LEADER:
-            case COMMAND_MAP_FOG:
-                i += 2;
-                break;
-
             case COMMAND_IF_DIRECTION:
                 ++i;
                 /* HACK direction 0x14 appears in a crypt under lonely stone in Breeland */
@@ -541,31 +535,11 @@ new_parsing:
                 }
                 break;
 
-            case COMMAND_DIE:
-            case COMMAND_END:
-            case COMMAND_IF_DAY:
-            case COMMAND_DISMISS_TMP_LEADER:
-            case COMMAND_MAP_NORMAL:
-            case COMMAND_MAP_DARK:
-            case COMMAND_MAP_LIGHT:
-            case COMMAND_IF_MAP_DARK:
-            case COMMAND_COMBAT:
-            case COMMAND_CAN_NOT_MOVE:
-            case COMMAND_CAN_MOVE:
-            case COMMAND_SAVE_POSITION:
-            case COMMAND_LOAD_POSITION:
-            case COMMAND_EXIT_BUILDING:
-            case COMMAND_47:
-            case COMMAND_END_OF_GAME:
-            case COMMAND_NO_OPERATION:
-                i += 1;
-                break;
-
 
             case COMMAND_TRUE_THEN:
             case COMMAND_FALSE_THEN:
                 next_level = level + (spot_chest_detect_return(spot, i) < 0);
-                i += 1;
+                i += opcode.size;
                 break;
 
             case COMMAND_ELSE:
@@ -582,13 +556,13 @@ new_parsing:
                 }
                 next_level = level;
                 level--;
-                i += 1;
+                i += opcode.size;
                 break;
 
             case COMMAND_ENDIF:
                 level--;
                 next_level = level;
-                i += 1;
+                i += opcode.size;
                 break;
 
             case COMMAND_NPC_QUESTIONS:
@@ -663,6 +637,10 @@ truncated_action:
                 return;
 
             default:
+                if (opcode.size) {
+                    i += opcode.size;
+                    break;
+                }
 unknown_command:
                 unknown = 1;
                 i = spot->data_size;
@@ -1157,7 +1135,7 @@ spot_get_string(CommandSpot *spot)
         int command;
 
         i = spot->command_start[k];
-        command = spot_command(spot->data[i], format);
+        command = spot_decode_opcode(spot->data[i], format).command;
 
         spot_string_print("%04x: ", i + spot->label_start);
         for (j = 0; j < spot->command_level[k] * 2; ++j)
@@ -2052,7 +2030,13 @@ spot_continue(CommandSpot *spot)
     while (spot->pos < spot->commands_num) {
         i = spot->command_start[spot->pos];
 
-        switch (spot_command(spot->data[i], format)) {
+        SpotOpcode opcode = spot_decode_opcode(spot->data[i], format);
+        if (opcode.size > spot->data_size - i) {
+            fprintf(stderr, "lotr: truncated spot command %02x\n", spot->data[i]);
+            return 0;
+        }
+
+        switch (opcode.command) {
 
             case COMMAND_02:
                 if (format == LOTR_DATA_STANDARD || enhanced_cd)
