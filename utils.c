@@ -67,7 +67,7 @@ static const LotrEdition editions[] = {
     {"enhanced-cd", "The Lord of the Rings, Vol. I - Enhanced CD",
      EDITION_ROOT "/cd", LOTR_INTRO_CD, LOTR_AUDIO_CD, 1, LOTR_DATA_ENHANCED_CD},
     {"two-towers", "The Lord of the Rings, Vol. II - The Two Towers",
-     EDITION_ROOT "/towers", LOTR_INTRO_CARTOON, LOTR_AUDIO_SILENT, 2, LOTR_DATA_TWO_TOWERS},
+     EDITION_ROOT "/towers", LOTR_INTRO_CARTOON, LOTR_AUDIO_TOWERS, 2, LOTR_DATA_TWO_TOWERS},
     {"demo", "The Lord of the Rings, Vol. I - Demo",
      DEMO_DIRECTORY, LOTR_INTRO_DEMO, LOTR_AUDIO_ARCHIVE, 1, LOTR_DATA_DEMO},
 };

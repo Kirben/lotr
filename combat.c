@@ -1163,6 +1163,8 @@ combat_attack(Character *who, Character *whom)
 
     if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
         sound_play(hits ? 13 : 17);  /* HIT1 / MISS1 */
+    else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
+        sound_play(hits ? 28 : 29);  /* HIT / MISS */
     else
         sound_play(hits ? 10 : 11);
 

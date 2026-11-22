@@ -43,10 +43,11 @@
 
 Uint8 *music_data;
 int music_size;
-static int cd_music_muted;
+static int music_muted;
 
-static Uint8 *sound_data[CD_SOUND_COUNT];
-static int sound_sizes[CD_SOUND_COUNT];
+enum { SOUND_CAPACITY = 36 };
+static Uint8 *sound_data[SOUND_CAPACITY];
+static int sound_sizes[SOUND_CAPACITY];
 
 #define MUSIC_MAIN_INDEX 8
 
@@ -171,6 +172,110 @@ load_cd_sounds(void)
 
 }
 
+
+/* Vol. II SOUND operands index this table in the retail DOS executable. */
+static const char *const towers_sound_names[] = {
+    "intro", "fellow", "gollum", "entsong", "nazgul", "saruman", "gandalf",
+    "theoden", "eowyn", "battle", "walkf", "walka", "walkm", "entmarch",
+    "orc", "elf", "dread", "happy", "success", "harad", "vampire", "gallop",
+    "scream", "moan", "olitrmp", "crow", "horn", "clash", "hit", "miss",
+    "howl", "laugh", "beep", "buzz", "magics", "magicf"
+};
+
+enum {
+    TOWERS_BATTLE = 9, TOWERS_WALKING = 10, TOWERS_SUCCESS = 18,
+    TOWERS_MAGIC_SUCCESS = 34, TOWERS_MAGIC_FAILURE = 35
+};
+
+static int towers_sampled[SDL_arraysize(towers_sound_names)];
+
+static Uint8 *
+read_towers_sound(const char *name, const char *extension, int *size)
+{
+    char filename[20];
+    snprintf(filename, sizeof(filename), "%s.%s", name, extension);
+    FILE *file = lotr_try_open_asset(filename, 0);
+    if (!file)
+        return NULL;
+    int length = lotr_filelen(file);
+    Uint8 *data = length > 0 ? lotr_malloc(length) : NULL;
+    if (data && fread(data, 1, length, file) != (size_t)length) {
+        free(data);
+        data = NULL;
+    }
+    fclose(file);
+    if (data)
+        *size = length;
+    return data;
+}
+
+static int
+load_towers_sample(int index, Uint8 *data, int size)
+{
+    if (size >= 32 && !memcmp(data, "Creative Voice File\x1a", 20)) {
+        /* Retail VOC cues are a single uncompressed mono Type 1 block. */
+        unsigned offset = data[20] | data[21] << 8;
+        if (offset > (unsigned)size - 6 || data[offset] != 1)
+            return 0;
+        unsigned divisor = 256 - data[offset + 4];
+        int payload = unwrap_cd_voice(data, size);
+        if (!payload)
+            return 0;
+        sound_sizes[index] = payload;
+        sound_data[index] = data;
+        resample_effect(index, 1000000, divisor);
+    } else if (size >= 8 && !memcmp(data, "\xff\xff\xff\xff", 4)) {
+        /* The speaker assets store 6-bit PCM and an 8253 timer divisor. */
+        unsigned length = data[4] | data[5] << 8;
+        unsigned divisor = data[6] | data[7] << 8;
+        if (!length || length > (unsigned)size - 8 || !divisor || divisor > 256)
+            return 0;
+        for (unsigned i = 0; i < length; ++i)
+            data[i] = (data[i + 8] & 63) * 4;
+        sound_sizes[index] = length;
+        sound_data[index] = data;
+        resample_effect(index, 1193182, divisor);
+    } else {
+        return 0;
+    }
+    towers_sampled[index] = 1;
+    return 1;
+}
+
+static void
+load_towers_sounds(void)
+{
+    for (int i = 0; i < SDL_arraysize(towers_sound_names); ++i) {
+        towers_sampled[i] = 0;
+        const char *name = towers_sound_names[i];
+        /* The FM intro contains setup events only. Prefer the Roland title score. */
+        const char *extensions[] = {i == 0 ? "rol" : "adl", "pcm", i == 0 ? "adl" : "rol"};
+        for (size_t j = 0; j < SDL_arraysize(extensions) && !sound_data[i]; ++j) {
+            int size;
+            Uint8 *data = read_towers_sound(name, extensions[j], &size);
+            if (!data)
+                continue;
+            if (load_towers_sample(i, data, size))
+                break;
+            if (size >= 4 && !memcmp(data, "FORM", 4))
+                sound_data[i] = convert_xmidi(data, size, &sound_sizes[i]);
+            free(data);
+        }
+    }
+}
+
+static void
+play_towers_sound(int index, int loop)
+{
+    if (index < 0 || index >= SDL_arraysize(towers_sound_names) || !sound_data[index])
+        return;
+    if (towers_sampled[index])
+        play_sample(sound_data[index], sound_sizes[index], LOTR_PCM_U8);
+    else if (!music_muted)
+        play_midi(sound_data[index], sound_sizes[index], loop);
+}
+
+
 void
 sound_init(void)
 {
@@ -181,6 +286,8 @@ sound_init(void)
         load_archive_sounds();
     else if (audio == LOTR_AUDIO_CD)
         load_cd_sounds();
+    else if (audio == LOTR_AUDIO_TOWERS)
+        load_towers_sounds();
 }
 
 
@@ -195,7 +302,9 @@ sound_close(void)
     int i;
 
     stop_midi();
-    for (i = 0; i < CD_SOUND_COUNT; ++i) {
+    for (i = 0; i < SOUND_CAPACITY; ++i) {
+        if (sound_data[i])
+            stop_sample(sound_data[i]);
         free(sound_data[i]);
         sound_data[i] = NULL;
         sound_sizes[i] = 0;
@@ -219,7 +328,7 @@ sound_play(int index)
             play_midi(sound_data[index + 8], sound_sizes[index + 8], 0);
     } else if (audio == LOTR_AUDIO_CD && index >= 0 && index <= 0x0a) {
         /* Play scripted CD cues once, using the ranges extracted from the disc. */
-        if (!midi_disabled && !cd_music_muted) {
+        if (!midi_disabled && !music_muted) {
             char name[sizeof("cd-cue-00.wav")];
             snprintf(name, sizeof(name), "cd-cue-%02X.wav", (unsigned)index);
             FILE *file = lotr_try_open_asset(name, 0);
@@ -229,6 +338,8 @@ sound_play(int index)
     } else if (audio == LOTR_AUDIO_CD && index >= 11 &&
                index - 11 < CD_SOUND_COUNT) {
         play_sample(sound_data[index - 11], sound_sizes[index - 11], LOTR_PCM_U8);
+    } else if (audio == LOTR_AUDIO_TOWERS) {
+        play_towers_sound(index, 0);
     }
 
 }
@@ -243,7 +354,7 @@ void
 play_music(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_CD) {
-        if (midi_disabled || cd_music_muted)
+        if (midi_disabled || music_muted)
             return;
         const char *tracks[] = {"cd-track-02.wav", "cd-track-03.wav", "cd-track-04.wav"};
         static int selected = -1;
@@ -259,7 +370,10 @@ play_music(void)
         }
         return;
     }
-    play_midi(music_data, music_size, TRUE);
+    if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
+        play_towers_sound(TOWERS_WALKING, TRUE);
+    else
+        play_midi(music_data, music_size, TRUE);
 }
 
 
@@ -271,8 +385,9 @@ void
 toggle_music(void)
 {
     int was_playing = stop_midi();
-    if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
-        cd_music_muted = was_playing;
+    LotrAudio audio = lotr_current_edition()->audio;
+    if (audio == LOTR_AUDIO_CD || audio == LOTR_AUDIO_TOWERS)
+        music_muted = was_playing;
     if (!was_playing)
         play_music();
 }
@@ -290,6 +405,8 @@ music_spell_performed(void)
         play_midi(sound_data[15], sound_sizes[15], 0);
     else if (audio == LOTR_AUDIO_CD)
         play_sample(sound_data[0], sound_sizes[0], LOTR_PCM_U8);
+    else if (audio == LOTR_AUDIO_TOWERS)
+        play_towers_sound(TOWERS_MAGIC_SUCCESS, 0);
 }
 
 
@@ -305,6 +422,8 @@ music_spell_failed(void)
         play_midi(sound_data[16], sound_sizes[16], 0);
     else if (audio == LOTR_AUDIO_CD)
         play_sample(sound_data[1], sound_sizes[1], LOTR_PCM_U8);
+    else if (audio == LOTR_AUDIO_TOWERS)
+        play_towers_sound(TOWERS_MAGIC_FAILURE, 0);
 }
 
 
@@ -318,6 +437,8 @@ music_combat_started(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
         play_midi(sound_data[21], sound_sizes[21], 0);
+    else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
+        play_towers_sound(TOWERS_BATTLE, 0);
 }
 
 
@@ -330,4 +451,6 @@ music_combat_won(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
         play_midi(sound_data[22], sound_sizes[22], 0);
+    else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
+        play_towers_sound(TOWERS_SUCCESS, 0);
 }

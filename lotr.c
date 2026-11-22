@@ -126,8 +126,11 @@ play_game:
     cartoon_show_credits(1);
     switch (lotr_current_edition()->intro) {
         case LOTR_INTRO_CARTOON:
-            if (game_num < 0)
+            if (game_num < 0) {
+                if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
+                    sound_play(0);
                 cartoon_play("opening");
+            }
             break;
         case LOTR_INTRO_CD:
             av_play("sacf");
@@ -141,7 +144,8 @@ play_game:
 
 
     game_init_graphics();
-    if (lotr_current_edition()->audio == LOTR_AUDIO_CD)
+    if (lotr_current_edition()->audio == LOTR_AUDIO_CD ||
+        lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
         play_music();
 
     lotr_reset_timer();

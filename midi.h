@@ -39,6 +39,9 @@ extern int midi_disabled;
 /* stops music return nonzero if music was not playing */
 extern int stop_midi(void);
 
+/* Convert a single XMIDI sequence to a Standard MIDI File. */
+extern Uint8 *convert_xmidi(const Uint8 *data, int size, int *midi_size);
+
 /* start music */
 extern void play_midi(Uint8 *data, int size, int loop);
 /* Takes ownership of the file. */

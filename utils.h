@@ -43,7 +43,7 @@ typedef enum {
 typedef enum {
     LOTR_AUDIO_ARCHIVE,
     LOTR_AUDIO_CD,
-    LOTR_AUDIO_SILENT
+    LOTR_AUDIO_TOWERS
 } LotrAudio;
 
 typedef enum {
