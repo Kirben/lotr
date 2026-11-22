@@ -196,6 +196,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\game_save.c"
+				>
+			</File>
+			<File
 				RelativePath="..\graphics.c"
 				>
 			</File>
