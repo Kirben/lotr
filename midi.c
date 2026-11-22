@@ -28,6 +28,7 @@
 
 #include "lotr.h"
 #include "midi.h"
+#include "roland.h"
 #include "utils.h"
 #ifdef HAVE_SDL_MIXER
 #include <SDL_mixer.h>
@@ -63,6 +64,10 @@ hook_music_finished()
 int
 stop_midi(void)
 {
+#ifdef LOTR_ROLAND_OUTPUT
+    if (roland_enabled())
+        return roland_stop();
+#endif
     int was_running = music_running;
 
 #ifdef HAVE_SDL_MIXER
@@ -109,7 +114,7 @@ start_music(SDL_RWops *stream, int loops)
 #endif
 
 void
-play_midi(Uint8 *data, int size, int loop)
+play_midi(Uint8 *data, int size, int loop, int fade_in)
 {
     if (midi_disabled)
         return;
@@ -122,6 +127,14 @@ play_midi(Uint8 *data, int size, int loop)
     }
 
     stop_midi();
+#ifdef LOTR_ROLAND_OUTPUT
+    if (roland_enabled()) {
+        roland_play(data, size, loop, fade_in);
+        return;
+    }
+#else
+    (void)fade_in;
+#endif
 
 #ifdef HAVE_SDL_MIXER
     int repeats = lotr_current_edition()->audio == LOTR_AUDIO_TOWERS ? 0 : 1;
@@ -173,8 +186,8 @@ resume_music_after_movie(int paused)
 }
 
 /* The shipped XMIDI cues have one EVNT stream on a 120 Hz clock. */
-static const Uint8 *
-find_xmidi_events(const Uint8 *data, size_t size, size_t *length, int depth)
+const Uint8 *
+midi_find_xmidi_events(const Uint8 *data, size_t size, size_t *length, int depth)
 {
     while (size >= 8) {
         Uint32 chunk = (Uint32)data[4] << 24 | (Uint32)data[5] << 16 |
@@ -187,7 +200,7 @@ find_xmidi_events(const Uint8 *data, size_t size, size_t *length, int depth)
         }
         if (depth && chunk >= 4 &&
             (!memcmp(data, "FORM", 4) || !memcmp(data, "CAT ", 4))) {
-            const Uint8 *events = find_xmidi_events(data + 12, chunk - 4, length, depth - 1);
+            const Uint8 *events = midi_find_xmidi_events(data + 12, chunk - 4, length, depth - 1);
             if (events)
                 return events;
         }
@@ -200,8 +213,8 @@ find_xmidi_events(const Uint8 *data, size_t size, size_t *length, int depth)
     return NULL;
 }
 
-static int
-read_midi_length(const Uint8 **data, const Uint8 *end, Uint32 *length)
+int
+midi_read_length(const Uint8 **data, const Uint8 *end, Uint32 *length)
 {
     *length = 0;
     for (int i = 0; i < 4 && *data < end; ++i) {
@@ -247,7 +260,7 @@ Uint8 *
 convert_xmidi(const Uint8 *data, int size, int *midi_size)
 {
     size_t length;
-    const Uint8 *stream = find_xmidi_events(data, size, &length, 4);
+    const Uint8 *stream = midi_find_xmidi_events(data, size, &length, 4);
     *midi_size = 0;
     if (!stream || !length || length > (INT_MAX - 32) / 8 ||
         length > INT_MAX / sizeof(XmidiEvent))
@@ -274,7 +287,7 @@ convert_xmidi(const Uint8 *data, int size, int *midi_size)
                     goto invalid;
                 type = *stream++;
             }
-            if (!read_midi_length(&stream, end, &delay) || delay > (size_t)(end - stream))
+            if (!midi_read_length(&stream, end, &delay) || delay > (size_t)(end - stream))
                 goto invalid;
             stream += delay;
             if (status == 0xff && type == 0x2f)
@@ -297,7 +310,7 @@ convert_xmidi(const Uint8 *data, int size, int *midi_size)
         events[count] = (XmidiEvent){tick, count, start, (size_t)(stream - start), {0}};
         ++count;
         if ((status & 0xf0) == 0x90) {
-            if (!read_midi_length(&stream, end, &delay) || delay > 0x0fffffff - tick)
+            if (!midi_read_length(&stream, end, &delay) || delay > 0x0fffffff - tick)
                 goto invalid;
             if (start[2]) {
                 events[count] = (XmidiEvent){tick + delay, count, NULL, 3,

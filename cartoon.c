@@ -33,6 +33,7 @@
 #include "cartoon.h"
 #include "archive.h"
 #include "credit.h"
+#include "sound.h"
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,6 +166,8 @@ cartoon_play(char *name)
     CartoonCommand *command;
     int i, j, k, l;
     int repeats;
+    int towers = lotr_current_edition()->audio == LOTR_AUDIO_TOWERS;
+    const Uint64 palette_step_us = 2000000000ULL / 70086;
     Pixmap *pixmaps[MAXRESOURCES];
     CartoonFont *fonts[MAXRESOURCES];
     int registers[MAXRESOURCES];
@@ -203,6 +206,8 @@ cartoon_play(char *name)
     graphics_update_screen();
 
     while (archivepos < archive->size && !lotr_key_esc()) {
+        Uint32 palette_epoch = SDL_GetTicks();
+        Uint64 palette_deadline = 0;
         data = decompress_idxarchive(archive, archivepos, &size);
         /* data are freed by cartoondesc_free */
 
@@ -269,6 +274,7 @@ cartoon_play(char *name)
 
                     while (!lotr_key_esc() && !lotr_get_key())
                         lotr_sleep(10);
+                    palette_deadline = 0;
 
                     break;
 
@@ -301,6 +307,7 @@ cartoon_play(char *name)
               /****************************************************/
                 case 0x2c:
                     lotr_timer(10);
+                    palette_deadline = 0;
                     break;
 
 
@@ -309,8 +316,6 @@ cartoon_play(char *name)
                 case 0x20:
                 case 0x04:
 
-                    /* this is probably completely wrong */
-
                     if (DEBUGCARTOONCOMMANDS)
                         printf(">>> ?Timing function (Unknown)?\n");
 
@@ -318,11 +323,25 @@ cartoon_play(char *name)
 
                     i = get_command_par(command, registers, 0);
 
-                    if (i > 0 && command->type == 0x04)
-                        lotr_sleep(i * 5);
+                    if (i > 0 && command->type == 0x04) {
+                        if (towers) {
+                            /* DOS time advances once per BIOS tick. The handler
+                               counts one change per four script units. */
+                            lotr_sleep((int)((i / 4) * 65536000ULL / 1193182));
+                            palette_deadline = 0;
+                        } else {
+                            lotr_sleep(i * 5);
+                        }
+                    }
 
-                    if (i < 0 && command->type == 0x27)
-                        lotr_sleep(-i * 5);
+                    if (i < 0 && command->type == 0x27) {
+                        if (towers && i == -4)
+                            sound_play(0); /* INTRO */
+                        else if (towers && i == -2)
+                            sound_play(1); /* FELLOW, the opening's second music cue */
+                        else
+                            lotr_sleep(-i * 5);
+                    }
 
 
 
@@ -1001,6 +1020,16 @@ cartoon_play(char *name)
                     checkcommandsize(command, 2);
 
                     i = get_command_par(command, registers, 0);
+                    /* DOS VGA writes half the palette on each of two
+                       successive 70 Hz vertical retraces. */
+                    if (towers) {
+                        Uint64 elapsed_us = (SDL_GetTicks() - palette_epoch) * 1000ULL;
+                        if (!palette_deadline)
+                            palette_deadline = elapsed_us;
+                        palette_deadline += palette_step_us;
+                        if (palette_deadline > elapsed_us)
+                            lotr_sleep((int)((palette_deadline - elapsed_us + 999) / 1000));
+                    }
                     graphics_fade_palette(i, 0, 0x100);
                     graphics_update_screen();
 

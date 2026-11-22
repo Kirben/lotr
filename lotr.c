@@ -42,6 +42,7 @@
 
 #include "av.h"
 #include "selector.h"
+#include "roland.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +57,14 @@ print_usage(FILE *stream, const char *program)
     fputs("Editions: standard, enhanced-cd, two-towers, demo\n", stream);
     fputs("--movie-dir is available for Enhanced CD.\n", stream);
 #endif
+#ifdef LOTR_ROLAND_OUTPUT
+    fputs("--list-midi-ports lists Windows MIDI outputs.\n"
+#ifndef DEMO
+          "Roland output is available in Standard DOS, the Fellowship demo, and The Two Towers.\n"
+#endif
+          "--roland-port NAME [--roland-profile lapc-i|mt-32|off]\n"
+          "The port and profile are remembered. Roland output defaults to lapc-i.\n", stream);
+#endif
 #if defined(LOTR_SDL2_SELECTOR) && !defined(DEMO)
     fputs("Run without options to open the edition selector.\n", stream);
 #endif
@@ -69,6 +78,11 @@ main(int argc, char *argv[])
     const char *edition = NULL;
     const char *data_dir = NULL;
     const char *movie_dir = NULL;
+#ifdef LOTR_ROLAND_OUTPUT
+    const char *roland_port = NULL, *roland_profile = NULL;
+    if (argc == 2 && !strcmp(argv[1], "--list-midi-ports"))
+        return roland_list_ports();
+#endif
     for (int i = 1; i < argc; ++i) {
         const char **value;
         if (strcmp(argv[i], "--help") == 0) {
@@ -81,6 +95,12 @@ main(int argc, char *argv[])
             value = &data_dir;
         else if (strcmp(argv[i], "--movie-dir") == 0)
             value = &movie_dir;
+#ifdef LOTR_ROLAND_OUTPUT
+        else if (strcmp(argv[i], "--roland-port") == 0)
+            value = &roland_port;
+        else if (strcmp(argv[i], "--roland-profile") == 0)
+            value = &roland_profile;
+#endif
         else {
             fprintf(stderr, "lotr: unknown option '%s'\n", argv[i]);
             print_usage(stderr, argv[0]);
@@ -102,6 +122,17 @@ main(int argc, char *argv[])
     if (!lotr_configure_edition(edition, data_dir, movie_dir))
         return 1;
 
+
+#ifdef LOTR_ROLAND_OUTPUT
+    int fellowship = lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE;
+    if (fellowship || lotr_current_edition()->audio == LOTR_AUDIO_TOWERS) {
+        if (!roland_configure(roland_port, roland_profile, fellowship))
+            return 1;
+    } else if (roland_port || roland_profile) {
+        fputs("lotr: Roland MIDI is available for Standard DOS, the Fellowship demo, and The Two Towers.\n", stderr);
+        return 1;
+    }
+#endif
 
     /* Check if game data is present */
     if (!lotr_file_exists("arts.dat")) {
@@ -126,11 +157,8 @@ play_game:
     cartoon_show_credits(1);
     switch (lotr_current_edition()->intro) {
         case LOTR_INTRO_CARTOON:
-            if (game_num < 0) {
-                if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
-                    sound_play(0);
+            if (game_num < 0)
                 cartoon_play("opening");
-            }
             break;
         case LOTR_INTRO_CD:
             av_play("sacf");

@@ -18,9 +18,9 @@ else
 endif
 
 HEADERFILES = archive.h av.h cartoon.h character.h combat.h credit.h lotr.h lotr_sdl.h map.h midi.h game.h graphics.h gui.h init.h object.h shape.h sound.h spot.h timing.h utils.h
-PLAYCARTOONOBJ = archive.o cartoon.o $(LOTR_SDL_OBJ) midi.o graphics.o sound.o timing.o utils.o voc.o
-PLAYAVOBJ = archive.o av.o $(LOTR_SDL_OBJ) midi.o graphics.o timing.o utils.o
-OBJFILES = archive.o av.o cartoon.o character.o combat.o $(LOTR_SDL_OBJ) map.o midi.o game.o gui.o graphics.o init.o object.o shape.o sound.o spot.o timing.o utils.o voc.o
+PLAYCARTOONOBJ = archive.o cartoon.o $(LOTR_SDL_OBJ) midi.o roland.o graphics.o sound.o timing.o utils.o voc.o
+PLAYAVOBJ = archive.o av.o $(LOTR_SDL_OBJ) midi.o roland.o graphics.o timing.o utils.o
+OBJFILES = archive.o av.o cartoon.o character.o combat.o $(LOTR_SDL_OBJ) map.o midi.o roland.o game.o gui.o graphics.o init.o object.o shape.o sound.o spot.o timing.o utils.o voc.o
 
 ifeq ($(USE_SDL_MIXER),1)
 DEFINITIONS += -DHAVE_SDL_MIXER
@@ -91,6 +91,8 @@ sound.o: sound.c sounds_cd.h $(HEADERFILES) voc.h
 
 
 voc.o: voc.c voc.h
+
+lotr.o midi.o roland.o sound.o: roland.h
 
 %.o: %.c $(HEADERFILES) Makefile Makefile.config
 	$(CC) $(CCPARAMS) -c $< -o $@

@@ -39,11 +39,14 @@ extern int midi_disabled;
 /* stops music return nonzero if music was not playing */
 extern int stop_midi(void);
 
+const Uint8 *midi_find_xmidi_events(const Uint8 *data, size_t size, size_t *length, int depth);
+int midi_read_length(const Uint8 **data, const Uint8 *end, Uint32 *length);
+
 /* Convert a single XMIDI sequence to a Standard MIDI File. */
 extern Uint8 *convert_xmidi(const Uint8 *data, int size, int *midi_size);
 
 /* start music */
-extern void play_midi(Uint8 *data, int size, int loop);
+extern void play_midi(Uint8 *data, int size, int loop, int fade_in);
 /* Takes ownership of the file. */
 extern void play_music_file(FILE *file, int loop);
 extern int pause_music_for_movie(void);

@@ -29,6 +29,7 @@
 #include "archive.h"
 #include "lotr_sdl.h"
 #include "midi.h"
+#include "roland.h"
 #include "sound.h"
 #include "utils.h"
 #include "voc.h"
@@ -88,6 +89,10 @@ load_archive_sounds(void)
 {
     int i;
     Archive *archive = archive_ndx_open("snd");
+    int preserve_timing = 0;
+#ifdef LOTR_ROLAND_OUTPUT
+    preserve_timing = roland_enabled();
+#endif
 
     for (i = 0; i < ARCHIVE_SOUND_COUNT; ++i) {
         sound_data[i] = archive_read(archive, i);
@@ -96,8 +101,8 @@ load_archive_sounds(void)
         if (i < MUSIC_MAIN_INDEX && lotr_current_edition()->data_format == LOTR_DATA_STANDARD)
             resample_effect(i, (SampleInfo){sound_sizes[i], 16000, 1});
 
-        /* Fix tempo in midi files */
-        if (sound_sizes[i] > 13
+        /* Keep the historical tempo adjustment for software playback. */
+        if (!preserve_timing && sound_sizes[i] > 13
             && sound_data[i][0] == 'M'
             && sound_data[i][1] == 'T'
             && sound_data[i][2] == 'h'
@@ -156,7 +161,7 @@ static const char *const towers_sound_names[] = {
 
 enum {
     TOWERS_BATTLE = 9, TOWERS_WALKING = 10, TOWERS_SUCCESS = 18,
-    TOWERS_MAGIC_SUCCESS = 34, TOWERS_MAGIC_FAILURE = 35
+    TOWERS_FIRST_EFFECT = 21, TOWERS_MAGIC_SUCCESS = 34, TOWERS_MAGIC_FAILURE = 35
 };
 
 static int towers_sampled[SDL_arraysize(towers_sound_names)];
@@ -212,11 +217,19 @@ load_towers_sample(int index, Uint8 *data, int size)
 static void
 load_towers_sounds(void)
 {
+    int use_roland = 0;
+#ifdef LOTR_ROLAND_OUTPUT
+    use_roland = roland_enabled();
+#endif
     for (int i = 0; i < SDL_arraysize(towers_sound_names); ++i) {
         towers_sampled[i] = 0;
         const char *name = towers_sound_names[i];
         /* The FM intro contains setup events only. Prefer the Roland title score. */
         const char *extensions[] = {i == 0 ? "rol" : "adl", "pcm", i == 0 ? "adl" : "rol"};
+        if (use_roland && i < TOWERS_FIRST_EFFECT) {
+            extensions[0] = "rol";
+            extensions[2] = "adl";
+        }
         for (size_t j = 0; j < SDL_arraysize(extensions) && !sound_data[i]; ++j) {
             int size;
             Uint8 *data = read_towers_sound(name, extensions[j], &size);
@@ -224,8 +237,16 @@ load_towers_sounds(void)
                 continue;
             if (load_towers_sample(i, data, size))
                 break;
-            if (size >= 4 && !memcmp(data, "FORM", 4))
+            if (use_roland && !strcmp(extensions[j], "rol")) {
+                size_t event_size;
+                if (midi_find_xmidi_events(data, size, &event_size, 4) && event_size) {
+                    sound_data[i] = data;
+                    sound_sizes[i] = size;
+                    break;
+                }
+            } else if (!use_roland && size >= 4 && !memcmp(data, "FORM", 4)) {
                 sound_data[i] = convert_xmidi(data, size, &sound_sizes[i]);
+            }
             free(data);
         }
     }
@@ -254,7 +275,12 @@ sound_close(void)
 
     int i;
 
-    stop_midi();
+#ifdef LOTR_ROLAND_OUTPUT
+    if (roland_enabled())
+        roland_close();
+    else
+#endif
+        stop_midi();
     for (i = 0; i < SOUND_CAPACITY; ++i) {
         if (sound_data[i])
             stop_sample(sound_data[i]);
@@ -289,7 +315,8 @@ play_cue(SoundSource source, int index, const char *filename, int loop)
         if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS &&
             (music_muted || !sound_data[index]))
             return 0;
-        play_midi(sound_data[index], sound_sizes[index], loop);
+        int fade_in = index == 0 && lotr_current_edition()->audio == LOTR_AUDIO_TOWERS;
+        play_midi(sound_data[index], sound_sizes[index], loop, fade_in);
     }
     return 1;
 }
@@ -387,11 +414,22 @@ music_spell_failed(void)
     }
 }
 
+/* DOS v1.3 selects the Roland bank at 8 for music cues 0 through 8. */
+static int
+fellowship_combat_music(int victory)
+{
+#ifdef LOTR_ROLAND_OUTPUT
+    if (lotr_current_edition()->data_format == LOTR_DATA_STANDARD && roland_enabled())
+        return MUSIC_MAIN_INDEX + 4 + victory;
+#endif
+    return 21 + victory;
+}
+
 void
 music_combat_started(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
-        play_cue(SOUND_MIDI, 21, NULL, 0);
+        play_cue(SOUND_MIDI, fellowship_combat_music(0), NULL, 0);
     else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
         sound_play(TOWERS_BATTLE);
 }
@@ -400,7 +438,7 @@ void
 music_combat_won(void)
 {
     if (lotr_current_edition()->audio == LOTR_AUDIO_ARCHIVE)
-        play_cue(SOUND_MIDI, 22, NULL, 0);
+        play_cue(SOUND_MIDI, fellowship_combat_music(1), NULL, 0);
     else if (lotr_current_edition()->audio == LOTR_AUDIO_TOWERS)
         sound_play(TOWERS_SUCCESS);
 }
