@@ -32,6 +32,7 @@
 #include "sound.h"
 #include "utils.h"
 #include <SDL.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,33 @@ static int sound_sizes[CD_SOUND_COUNT];
 #define MUSIC_MAIN_INDEX 8
 
 
+/* Both mixers accept effects on a 22,050 Hz mono PCM grid. */
+static void
+resample_effect(int index, unsigned rate_numerator, unsigned rate_denominator)
+{
+    int size = sound_sizes[index];
+    if (size <= 0)
+        return;
+
+    Uint64 scale = 22050u * rate_denominator;
+    Uint64 frames = ((Uint64)size * scale + rate_numerator / 2) / rate_numerator;
+    if (frames > INT_MAX) {
+        fprintf(stderr, "lotr: sampled effect %d is too large\n", index);
+        exit(1);
+    }
+
+    Uint8 *source = sound_data[index];
+    Uint8 *pcm = lotr_malloc((int)frames);
+    /* Hold each original sample until the next source sample begins. */
+    for (Uint64 frame = 0; frame < frames; ++frame)
+        pcm[frame] = source[frame * rate_numerator / scale];
+
+    free(source);
+    sound_data[index] = pcm;
+    sound_sizes[index] = (int)frames;
+}
+
+
 /*
   sound initializations
 */
@@ -63,6 +91,9 @@ load_archive_sounds(void)
     for (i = 0; i < ARCHIVE_SOUND_COUNT; ++i) {
         sound_data[i] = archive_read(archive, i);
         sound_sizes[i] = archive_data_size(archive, i);
+
+        if (i < MUSIC_MAIN_INDEX && lotr_current_edition()->data_format == LOTR_DATA_STANDARD)
+            resample_effect(i, 16000, 1);
 
         /* Fix tempo in midi files */
         if (sound_sizes[i] > 13
@@ -131,6 +162,8 @@ load_cd_sounds(void)
         }
         fclose(adlfile);
         sound_sizes[i] = unwrap_cd_voice(sound_data[i], sound_sizes[i]);
+        /* Sound Blaster time constant 0xd2 gives 1 MHz / (256 - 0xd2). */
+        resample_effect(i, 1000000, 256 - 0xd2);
         if (!sound_sizes[i])
             fprintf(stderr, "lotr: unsupported or empty CD effect %s\n",
                     cd_sound_names[i]);
